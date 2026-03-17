@@ -8,6 +8,16 @@ from typing import Optional, Callable, Dict, Tuple
 
 from .stain_normalization import apply_macenko
 
+def get_image_paths(directory: str) -> list:
+    """Recursively find all images in a directory."""
+    valid_exts = {'.jpg', '.png', '.jpeg', '.tif', '.tiff'}
+    paths = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if os.path.splitext(file)[1].lower() in valid_exts:
+                paths.append(os.path.join(root, file))
+    return paths
+
 class MycetomaDataset(Dataset):
     """
     Multi-task PyTorch dataset for Mycetoma microscopic images.
@@ -46,6 +56,24 @@ class MycetomaDataset(Dataset):
                 assert len(bounding_boxes) == len(image_paths)
             if subtypes is not None:
                 assert len(subtypes) == len(image_paths)
+
+    @classmethod
+    def from_ssl_directories(cls, root_dirs: list, **kwargs):
+        """
+        Builds a single vast SSL dataset out of multiple external dataset folders.
+        Args:
+            root_dirs: List of paths to datasets (e.g. ['data/LC25000', 'data/OpenFungi'])
+        """
+        all_paths = []
+        for d in root_dirs:
+            if os.path.isdir(d):
+                all_paths.extend(get_image_paths(d))
+            else:
+                print(f"Warning: SSL directory {d} not found.")
+                
+        # Force is_ssl to true and labels to None
+        kwargs['is_ssl'] = True
+        return cls(image_paths=all_paths, labels=None, bounding_boxes=None, subtypes=None, **kwargs)
 
     def __len__(self) -> int:
         return len(self.image_paths)
