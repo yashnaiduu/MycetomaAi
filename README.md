@@ -1,88 +1,67 @@
 # Mycetoma AI Diagnostics
 
-A research-grade AI system capable of diagnosing Mycetoma from histopathology microscopic images and identifying sub-types of causative organisms (Eumycetoma vs Actinomycetoma).
+A research-grade AI system for diagnosing Mycetoma from histopathology microscopic images. This system implements a multi-component deep learning pipeline engineered specifically to handle medical data scarcity.
 
-This architecture implements a multi-component deep learning pipeline engineered specifically to handle the "small dataset problem" common with Neglected Tropical Diseases.
+## 🚀 Training on Google Colab
+
+Use the provided `notebooks/colab_training_setup.ipynb` for cloud training. 
+
+### 🔧 Critical Fixes for Colab Sessions
+To resolve common path and permission errors:
+
+1. **Kaggle Dataset Download:**
+   The dataset is owned by the project service account. Use this path:
+   ```bash
+   !kaggle datasets download -d supporoot/mycetoma-ai-pretraining-data --unzip -p data/
+   ```
+
+2. **PYTHONPATH Configuration:**
+   Before running any training scripts, tell Python where the `src` module is located:
+   ```bash
+   %env PYTHONPATH=.:$PYTHONPATH
+   ```
+
+3. **Working Directory:**
+   Ensure you are inside the repository root:
+   ```bash
+   %cd /content/MycetomaAi
+   ```
 
 ## 🧠 System Architecture
 
-The model combines Self-Supervised Learning (SSL), Weak Localization, Diffusion Masking, and Graph Neural Networks.
-
-1. **Pre-Processing Component**:
-   - `Macenko Stain Normalization` to reduce inter-laboratory visual variance.
-   - Heavy spatial, morphological, and color augmentations tailored for histopathology.
-
-2. **Self-Supervised Encoder (HybridSSLEncoder)**:
-   - Combines structural learning from **SimCLR** with semantic awareness from **DINOv2**.
-   - Solves the problem of missing large annotated datasets by learning underlying image distributions first.
-
-3. **Attention-Enhanced Backbone (ResNet50CBAM)**:
-   - ResNet50 core with injects of Channel and Spatial Attention Modules (CBAM).
-   - Forces the network to ignore benign background human tissue and focus heavily on fungal/bacterial "grain" structures (which usually occupy < 20% of an image).
-
-4. **Weakly Supervised Grain Localization & Diffusion Segmentation**:
-   - Grad-CAM heatmaps generate rough class activation regions based purely on the classification signal.
-   - A lightweight 2D Diffusion Model (`DiffusionSegmentationRefiner`) denoises this probability map to produce a refined pixel-perfect structural segmentation mask—eliminating the need for manual polygon labeling.
-
-5. **Multi-Task & Few-Shot Learning**:
-   - Instead of separate networks, a single `MultiTaskHead` jointly optimizes:
-     - Fungal / Bacterial / Normal Classification (Cross Entropy)
-     - Target coordinates detection (Smooth L1)
-     - Granular strain subtype identification
-   - A parallel `PrototypicalNetwork` allows extreme few-shot identification of exceptionally rare pathogens using Euclidean distances in an embedding space instead of standard linear classifiers.
-
-6. **Graph Morphology Classification**:
-   - `MorphologyGNN` processes extracted nodes from segmented grain boundaries, translating the structural branching patterns into a classification signal.
+- **Attention-Enhanced Backbone (ResNet50CBAM):** Focuses on fungal/bacterial grain morphology.
+- **Hybrid Self-Supervised Encoder:** Fuses SimCLR and DINOv2 for robust feature extraction without labels.
+- **Multi-Task Diagnostic Head:** Jointly optimizes classification, detection, and subtype identification.
 
 ## 🛠 Project Structure
 
 ```bash
-Mycetoma-AI/
+MycetomaAi/
 ├── README.md
 ├── requirements.txt
+├── kaggle.json             # (Local only, Git-ignored)
 ├── notebooks/
-│   └── xai_exploration.ipynb   # Interactive analysis of Model Heatmaps
+│   └── colab_training_setup.ipynb
 ├── scripts/
-│   ├── train.py                # Main CLI for Model pretraining and fine-tuning
-│   └── evaluate.py             # CLI for testing models and generating evaluation metrics
+│   ├── train.py            # Main entry point (Pretrain/Finetune)
+│   └── evaluate.py         # Model evaluation
 └── src/
-    ├── data/                   # Macenko Normalization, PyTorch DataLoaders, and Augmentations
-    ├── evaluation/             # ROC-AUC, Sensitivity, Specificity, and Grad-CAM Explainer
-    ├── models/                 # Architecture (Backbones, GNNs, Prototypical Nets, Diffusers)
-    └── training/               # Custom Multi-Task Losses and Train loops
+    ├── data/               # DataLoaders & StainNormalization
+    ├── models/             # Core AI Architectures
+    └── training/           # Loss functions & Trainer loops
 ```
 
-## 🚀 Usage Guide
+## 🛠 Usage
 
-### 1. Setup
-
+### SSL Pretraining
 ```bash
-pip install -r requirements.txt
+python scripts/train.py --stage pretrain --epochs 100
 ```
 
-> **Note**: For data preparation, you must configure the mock structures inside `scripts/train.py` to point to your `MyData` (~864 images) local directory structure. The input shapes expect square tensor crops post-normalization.
-
-### 2. Self-Supervised Pretraining
-Before providing any labels, let the encoder learn the visual domain.
-
+### Supervised Finetuning
 ```bash
-python scripts/train.py --ssl --batch_size 16 --epochs 100
+python scripts/train.py --stage finetune --checkpoint checkpoints/ssl/ssl_encoder_ep100.pth
 ```
-This forces the model to align views using SimCLR contrastive `InfoNCE` losses combined with DINOv2 frozen features.
-
-### 3. Multi-Task Supervised Finetuning
-Once pretrained, execute the supervised loop leveraging your subtype parameters, bounding boxes, and image labels.
-
-```bash
-python scripts/train.py --batch_size 16 --epochs 50 --lr 1e-4
-```
-
-### 4. Evaluation & XAI Visualization
-To evaluate clinical thresholds globally on the test dataset:
-```bash
-python scripts/evaluate.py --model_path checkpoints/multitask/best_multi_task_model.pth
-```
-To visually inspect *why* the model made a decision, launch Jupyter and use `notebooks/xai_exploration.ipynb` to see the Grad-CAM activation overlays pinpointing the target fungus/bacteria.
 
 ---
-*Built for deployment in clinical environments as offline diagnostic tooling and lightweight inference edge systems.*
+*Optimized for high-performance training on NVIDIA T4/A100 GPUs via Google Colab.*
