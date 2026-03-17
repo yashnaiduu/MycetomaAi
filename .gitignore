@@ -1,0 +1,53 @@
+# === Datasets & Large Files ===
+data/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+.venv/
+venv/
+env/
+
+# === Machine Learning ===
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.h5
+*.pkl
+runs/
+logs/
+wandb/
+mlruns/
+
+# === macOS ===
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# === Jupyter ===
+.ipynb_checkpoints/
+*.ipynb
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === Environment ===
+.env
+.env.*
+*.env
+
+# === Temporary ===
+tmp/
+temp/
+*.log
