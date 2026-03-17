@@ -118,3 +118,41 @@ class MycetomaDataset(Dataset):
             out["subtype"] = torch.tensor(self.subtypes[idx], dtype=torch.long)
             
         return out
+class MultiDatasetWrapper(Dataset):
+    """
+    Wrapper for multiple datasets to handle balanced sampling.
+    Useful when one dataset (like LC25000) is much larger than another (OpenFungi).
+    """
+    def __init__(self, datasets: list, samples_per_dataset: Optional[int] = None):
+        """
+        Args:
+            datasets: List of Dataset objects.
+            samples_per_dataset: If set, each dataset will contribute exactly this many samples 
+                                per epoch (by looping or subsetting).
+        """
+        self.datasets = datasets
+        self.samples_per_dataset = samples_per_dataset
+        
+        if samples_per_dataset is not None:
+            self.length = len(datasets) * samples_per_dataset
+        else:
+            self.length = sum(len(d) for d in datasets)
+
+    def __len__(self) -> int:
+        return self.length
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        if self.samples_per_dataset is not None:
+            dataset_idx = idx // self.samples_per_dataset
+            sample_idx = idx % self.samples_per_dataset
+            # Loop around if dataset is smaller than samples_per_dataset
+            sample_idx = sample_idx % len(self.datasets[dataset_idx])
+            return self.datasets[dataset_idx][sample_idx]
+        else:
+            # Simple concatenation logic
+            curr_idx = idx
+            for d in self.datasets:
+                if curr_idx < len(d):
+                    return d[curr_idx]
+                curr_idx -= len(d)
+            raise IndexError("Index out of bounds")

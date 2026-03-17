@@ -16,7 +16,7 @@ def get_supervised_transforms(size: int = 224) -> Dict[str, A.Compose]:
             A.RandomRotate90(p=0.5),
             A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.2, rotate_limit=45, p=0.8),
             A.RandomBrightnessContrast(p=0.5),
-            A.ElasticTransform(p=0.3, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+            A.ElasticTransform(p=0.3, alpha=120, sigma=120 * 0.05),
             A.GaussianBlur(p=0.2),
             A.GaussNoise(p=0.2),
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
