@@ -46,6 +46,7 @@ mlruns/
 .env
 .env.*
 *.env
+kaggle.json
 
 # === Temporary ===
 tmp/
