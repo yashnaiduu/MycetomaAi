@@ -1,5 +1,6 @@
 import logging
 import torch
+from torch.cuda.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import os
@@ -19,6 +20,7 @@ class MultiTaskTrainer:
         self.save_dir = save_dir
         self.criterion = MultiTaskLoss().to(device)
         self.scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-7)
+        self.scaler = GradScaler(enabled=(device.type == 'cuda'))
         self.max_grad_norm = 1.0
         
         os.makedirs(self.save_dir, exist_ok=True)
@@ -30,17 +32,20 @@ class MultiTaskTrainer:
         
         pbar = tqdm(self.train_loader, desc=f"Train Epoch {epoch+1}/{self.epochs}")
         for batch in pbar:
-            images = batch["image"].to(self.device)
-            targets = {k: v.to(self.device) for k, v in batch.items() if k != "image"}
+            images = batch["image"].to(self.device, non_blocking=True)
+            targets = {k: v.to(self.device, non_blocking=True) for k, v in batch.items() if k != "image"}
             
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
             
-            preds = self.model(images)
-            loss, loss_dict = self.criterion(preds, targets)
+            with autocast(enabled=(self.device.type == 'cuda')):
+                preds = self.model(images)
+                loss, loss_dict = self.criterion(preds, targets)
             
-            loss.backward()
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-            self.optimizer.step()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
             
             total_loss += loss.item()
             pbar.set_postfix({
@@ -61,18 +66,19 @@ class MultiTaskTrainer:
         total_loss = 0.0
         
         for batch in self.val_loader:
-            images = batch["image"].to(self.device)
-            targets = {k: v.to(self.device) for k, v in batch.items() if k != "image"}
+            images = batch["image"].to(self.device, non_blocking=True)
+            targets = {k: v.to(self.device, non_blocking=True) for k, v in batch.items() if k != "image"}
             
-            preds = self.model(images)
-            loss, _ = self.criterion(preds, targets)
+            with autocast(enabled=(self.device.type == 'cuda')):
+                preds = self.model(images)
+                loss, _ = self.criterion(preds, targets)
             
             total_loss += loss.item()
             
         return total_loss / len(self.val_loader)
 
     def train(self):
-        logger.info("Starting Multi-Task Fine-Tuning...")
+        logger.info("Starting Multi-Task Fine-Tuning (AMP enabled)...")
         for epoch in range(self.epochs):
             train_loss = self.train_epoch(epoch)
             val_loss = self.validate()
