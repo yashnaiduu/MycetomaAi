@@ -3,18 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class PrototypicalNetwork(nn.Module):
-    """
-    Prototypical Network Head for Few-Shot Learning.
-    Designed to handle the rare pathogen subtypes with limited examples.
-    Calculates Euclidean distances between query samples and class prototypes.
-    """
+    """Few-shot prototypical network head."""
     def __init__(self, in_features=2048, hidden_dim=512, z_dim=128):
-        """
-        Args:
-            in_features: Input features from ResNet CBAM output (flattened).
-            hidden_dim: Hidden dimension size.
-            z_dim: Output dimension of encoded prototypes.
-        """
         super(PrototypicalNetwork, self).__init__()
         
         self.encoder = nn.Sequential(
@@ -25,27 +15,12 @@ class PrototypicalNetwork(nn.Module):
         )
 
     def forward(self, features):
-        """
-        Encodes features into the embedding space where prototypes live.
-        Args:
-            features: [B, in_features]
-        Returns:
-            Embeddings: [B, z_dim]
-        """
+        """Encode into embedding space."""
         return self.encoder(features)
     
     @staticmethod
     def euclidean_dist(x, y):
-        """
-        Compute euclidean distance between two tensors.
-        Args:
-            x: queries [N, D]
-            y: prototypes [M, D]
-        Returns:
-            dist: distances [N, M]
-        """
-        # x: N x D
-        # y: M x D
+        """Pairwise euclidean distance."""
         n = x.size(0)
         m = y.size(0)
         d = x.size(1)
@@ -57,15 +32,7 @@ class PrototypicalNetwork(nn.Module):
         return torch.pow(x - y, 2).sum(2)
         
     def loss(self, query_features, support_features, support_labels, query_labels):
-        """
-        Calculates Prototypical Loss.
-        Args:
-            query_features: Encoded query examples [N_q, z_dim]
-            support_features: Encoded support examples [N_s, z_dim]
-            support_labels: Labels for support set [N_s]
-            query_labels: Targets for query set [N_q]
-        """
-        # Calculate prototypes for each class in the support set
+        """Compute prototypical loss."""
         classes = torch.unique(support_labels)
         prototypes = []
         
@@ -77,18 +44,14 @@ class PrototypicalNetwork(nn.Module):
             
         prototypes = torch.stack(prototypes)
         
-        # Calculate distances from queries to prototypes
         dists = self.euclidean_dist(query_features, prototypes)
         
-        # Log softmax of negative distances
         log_p_y = F.log_softmax(-dists, dim=1)
         
-        # Find index of target class in prototypes list
         target_inds = torch.tensor([
             (classes == y).nonzero(as_tuple=True)[0][0] for y in query_labels
         ], dtype=torch.long, device=query_labels.device)
         
-        # Cross entropy loss
         loss = F.nll_loss(log_p_y, target_inds)
         
         return loss, log_p_y

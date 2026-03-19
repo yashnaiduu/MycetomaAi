@@ -4,7 +4,7 @@ import torchvision.models as models
 
 class ChannelAttention(nn.Module):
     def __init__(self, in_planes, ratio=16):
-        super(ChannelAttention, self).__init__()
+        super().__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.max_pool = nn.AdaptiveMaxPool2d(1)
            
@@ -23,7 +23,7 @@ class ChannelAttention(nn.Module):
 
 class SpatialAttention(nn.Module):
     def __init__(self, kernel_size=7):
-        super(SpatialAttention, self).__init__()
+        super().__init__()
         assert kernel_size in (3, 7), 'kernel size must be 3 or 7'
         padding = 3 if kernel_size == 7 else 1
         self.conv1 = nn.Conv2d(2, 1, kernel_size, padding=padding, bias=False)
@@ -38,7 +38,7 @@ class SpatialAttention(nn.Module):
 
 class CBAMBlock(nn.Module):
     def __init__(self, in_planes, ratio=16, kernel_size=7):
-        super(CBAMBlock, self).__init__()
+        super().__init__()
         self.ca = ChannelAttention(in_planes, ratio)
         self.sa = SpatialAttention(kernel_size)
 
@@ -48,16 +48,12 @@ class CBAMBlock(nn.Module):
         return x
 
 class ResNet50CBAM(nn.Module):
-    """
-    ResNet50 backbone enhanced with CBAM (Convolutional Block Attention Module).
-    Forces the network to focus on grain structures rather than background tissue.
-    """
+    """ResNet50 with CBAM attention."""
     def __init__(self, pretrained=True):
-        super(ResNet50CBAM, self).__init__()
-        # Load standard ResNet50
-        resnet = models.resnet50(pretrained=pretrained)
+        super().__init__()
+        weights = models.ResNet50_Weights.IMAGENET1K_V1 if pretrained else None
+        resnet = models.resnet50(weights=weights)
         
-        # Breakdown into stages to insert CBAM after each major residual block
         self.conv1 = resnet.conv1
         self.bn1 = resnet.bn1
         self.relu = resnet.relu
@@ -93,4 +89,4 @@ class ResNet50CBAM(nn.Module):
         x = self.layer4(x)
         x = self.cbam4(x)
         
-        return x # Returns feature map of shape [B, 2048, H/32, W/32]
+        return x

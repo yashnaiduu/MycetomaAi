@@ -2,29 +2,17 @@ import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix
 
 def compute_metrics(y_true, y_pred, y_prob=None):
-    """
-    Compute Evaluation Metrics for medical classification.
-    Args:
-        y_true: Array-like of ground truth labels
-        y_pred: Array-like of predicted labels
-        y_prob: Array-like of probabilities (required for ROC-AUC) [N, NumClasses]
-    Returns:
-        Dictionary of metrics
-    """
+    """Compute classification evaluation metrics."""
     acc = accuracy_score(y_true, y_pred)
     f1 = f1_score(y_true, y_pred, average='weighted')
     
-    # Needs probabilities for ROC-AUC
     auc = None
     if y_prob is not None:
         try:
             auc = roc_auc_score(y_true, y_prob, multi_class='ovr')
         except ValueError:
-            # Handles edge case when only one class is present in batch
             auc = np.nan
             
-    # Compute Sensitivity/Specificity per class via Confusion Matrix
-    # Using Macro approach
     cm = confusion_matrix(y_true, y_pred)
     
     sensitivities = []
@@ -51,10 +39,7 @@ def compute_metrics(y_true, y_pred, y_prob=None):
     }
 
 def bbox_iou(box1, box2):
-    """
-    Calculate IoU (Intersection over Union) for Detection Task.
-    box format: [x_min, y_min, x_max, y_max]
-    """
+    """Calculate IoU between boxes."""
     x1_inter = max(box1[0], box2[0])
     y1_inter = max(box1[1], box2[1])
     x2_inter = min(box1[2], box2[2])

@@ -4,10 +4,7 @@ from torchvision import transforms
 from typing import Dict
 
 def get_supervised_transforms(size: int = 224) -> Dict[str, A.Compose]:
-    """
-    Returns dictionary of Albaumentations transforms for train, val, and test.
-    Used for multi-task supervised fine-tuning.
-    """
+    """Train/val/test augmentation transforms."""
     return {
         'train': A.Compose([
             A.Resize(size, size),
@@ -35,10 +32,7 @@ def get_supervised_transforms(size: int = 224) -> Dict[str, A.Compose]:
     }
 
 class SimCLRTransform:
-    """
-    Hybrid SSL transform block for SimCLR + DINOv2 integration.
-    Generates two augmented views of the same image for contrastive learning.
-    """
+    """Contrastive dual-view augmentation."""
     def __init__(self, size=224):
         self.transform = transforms.Compose([
             transforms.RandomResizedCrop(size=size),

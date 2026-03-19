@@ -3,10 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class NTXentLoss(nn.Module):
-    """
-    Normalized Temperature-scaled Cross Entropy Loss (NT-Xent).
-    Used for SimCLR style self-supervised learning.
-    """
+    """NT-Xent contrastive loss."""
     def __init__(self, temperature=0.5):
         super(NTXentLoss, self).__init__()
         self.temperature = temperature
@@ -22,10 +19,7 @@ class NTXentLoss(nn.Module):
         return mask
 
     def forward(self, z_i, z_j):
-        """
-        Args:
-            z_i, z_j: Projections of two augmented views [B, dim]
-        """
+        """z_i, z_j: projections [B, D]"""
         batch_size = z_i.shape[0]
         N = 2 * batch_size
         z = torch.cat((z_i, z_j), dim=0)
@@ -47,13 +41,7 @@ class NTXentLoss(nn.Module):
         return loss / N
 
 class MultiTaskLoss(nn.Module):
-    """
-    Weighted Multi-Task Loss for Mycetoma Diagnosis.
-    Combines:
-    1. Classification (CrossEntropy)
-    2. Detection (Smooth L1 / MSE)
-    3. Subtype (CrossEntropy)
-    """
+    """Weighted multi-task loss."""
     def __init__(self, weights={'cls': 1.0, 'det': 1.0, 'sub': 0.5}):
         super(MultiTaskLoss, self).__init__()
         self.weights = weights
@@ -62,11 +50,7 @@ class MultiTaskLoss(nn.Module):
         self.sub_criterion = nn.CrossEntropyLoss()
 
     def forward(self, preds, targets):
-        """
-        Args:
-            preds: Dict containing 'classification', 'detection', 'subtype'
-            targets: Dict containing 'classification', 'detection', 'subtype'
-        """
+        """preds/targets: task prediction dicts."""
         loss_cls = self.cls_criterion(preds['classification'], targets['classification'])
         loss_det = self.det_criterion(preds['detection'], targets['detection'])
         loss_sub = self.sub_criterion(preds['subtype'], targets['subtype'])

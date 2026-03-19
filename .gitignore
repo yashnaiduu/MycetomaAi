@@ -34,7 +34,6 @@ mlruns/
 
 # === Jupyter ===
 .ipynb_checkpoints/
-*.ipynb
 
 # === IDE / Editor ===
 .vscode/

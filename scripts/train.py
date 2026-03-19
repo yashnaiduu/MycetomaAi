@@ -1,4 +1,5 @@
 import argparse
+import logging
 import random
 import torch
 from torch.utils.data import DataLoader
@@ -11,13 +12,15 @@ from src.training.ssl_pretrainer import SSLPreTrainer
 
 import os
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
     
     if args.stage == "pretrain":
-        print("=== Initiating Self-Supervised Pretraining ===")
-        # Get immediate subdirectories in pretrain_data_dir (e.g. LC25000, OpenFungi)
+        logger.info("=== Self-Supervised Pretraining ===")
         root_dirs = []
         if os.path.exists(args.pretrain_data_dir):
             for d in os.listdir(args.pretrain_data_dir):
@@ -25,64 +28,59 @@ def main(args):
                 if os.path.isdir(full_path):
                     root_dirs.append(full_path)
                     
-        print(f"Loading data from pretraining directories: {root_dirs}")
+        logger.info(f"Pretraining directories: {root_dirs}")
         
-        # Build individual datasets to allow for balanced sampling
         datasets = []
         for rd in root_dirs:
             img_paths = get_image_paths(rd)
             if len(img_paths) > 0:
-                print(f"  - Found {len(img_paths)} images in {os.path.basename(rd)}")
+                logger.info(f"  Found {len(img_paths)} images in {os.path.basename(rd)}")
                 datasets.append(MycetomaDataset(img_paths, is_ssl=True, transform=SimCLRTransform()))
         
         if not datasets:
-            print("Error: No images found in pretraining directories.")
+            logger.error("No images found in pretraining directories.")
             return
 
-        # Use MultiDatasetWrapper to balance disparate dataset sizes
         dataset = MultiDatasetWrapper(datasets, samples_per_dataset=args.samples_per_dataset)
-        print(f"Total balanced SSL dataset size: {len(dataset)}")
+        logger.info(f"Total balanced SSL dataset size: {len(dataset)}")
 
         if args.verify_data:
             sample = dataset[0]
-            print(f"✅ Data Verification Successful. Sample view1 shape: {sample['view1'].shape}")
+            logger.info(f"Data OK. Sample view1 shape: {sample['view1'].shape}")
             return
             
         dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
         
-        # Build SSL Model (ResNet50 + Hybrid Projection Heads)
         model = MycetomaAIModel(mode='pretrain').to(device)
-        
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
         
-        # Start SSL Training
         pretrainer = SSLPreTrainer(model, optimizer, dataloader, device, epochs=args.epochs)
         pretrainer.train()
         
     elif args.stage == "finetune":
-        print("=== Initiating Multi-Task Finetuning ===")
+        logger.info("=== Multi-Task Finetuning ===")
         
         if not os.path.exists(args.finetune_data_dir):
-            print(f"Error: Finetune data directory '{args.finetune_data_dir}' not found.")
+            logger.error(f"Finetune data directory '{args.finetune_data_dir}' not found.")
             return
 
         img_paths = get_image_paths(args.finetune_data_dir)
         num_imgs = len(img_paths)
-        print(f"Loading {num_imgs} images for finetuning from {args.finetune_data_dir}.")
+        logger.info(f"Loading {num_imgs} images from {args.finetune_data_dir}")
         
-        # Fallback: dummy labels for structure verification
+        # Dummy labels for verification
         labels = [random.choice([0, 1, 2]) for _ in range(num_imgs)]
         boxes = [[0.1, 0.1, 0.8, 0.8] for _ in range(num_imgs)]
         subtypes = [random.randint(0, 9) for _ in range(num_imgs)]
         
         transforms = get_supervised_transforms()
         
-        # Split 80/20 train/val
+        # 80/20 train/val split
         random.shuffle(img_paths)
         split_idx = int(0.8 * num_imgs)
         
         if split_idx == 0 and num_imgs > 0:
-            split_idx = 1 # Force at least one image into training for tiny datasets
+            split_idx = 1
             
         train_ds = MycetomaDataset(img_paths[:split_idx], labels[:split_idx], boxes[:split_idx], subtypes[:split_idx], transform=transforms['train'])
         val_ds = MycetomaDataset(img_paths[split_idx:], labels[split_idx:], boxes[split_idx:], subtypes[split_idx:], transform=transforms['val'])
@@ -91,23 +89,20 @@ def main(args):
             train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4)
             val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
         else:
-            print("Error: No images found for training split.")
+            logger.error("No images found for training split.")
             return
         
-        # Build Downstream Model (ResNet50 + Multi-Task Heads)
         model = MycetomaAIModel(mode='finetune').to(device)
         
-        # Load SSL Pretrained Weights if available
         if args.checkpoint: 
             model.load_backbone(args.checkpoint)
         
         if args.verify_data:
-            print("✅ Data Verification Successful for finetuning.")
+            logger.info("Data verification OK for finetuning.")
             return
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr * 0.1, weight_decay=1e-2)
         
-        # Start Supervised Fine-tuning
         trainer = MultiTaskTrainer(model, optimizer, train_loader, val_loader, device, epochs=args.epochs)
         trainer.train()
 

@@ -9,7 +9,7 @@ from typing import Optional, Callable, Dict, Tuple
 from .stain_normalization import apply_macenko
 
 def get_image_paths(directory: str) -> list:
-    """Recursively find all images in a directory."""
+    """Recursively find all images."""
     valid_exts = {'.jpg', '.png', '.jpeg', '.tif', '.tiff'}
     paths = []
     for root, _, files in os.walk(directory):
@@ -19,10 +19,7 @@ def get_image_paths(directory: str) -> list:
     return paths
 
 class MycetomaDataset(Dataset):
-    """
-    Multi-task PyTorch dataset for Mycetoma microscopic images.
-    Returns images, and labels for multiple tasks (classification, detection, subtype).
-    """
+    """Multi-task dataset for Mycetoma images."""
     def __init__(self, 
                  image_paths: list, 
                  labels: Optional[list] = None, 
@@ -31,16 +28,6 @@ class MycetomaDataset(Dataset):
                  transform: Optional[Callable] = None,
                  use_macenko: bool = True,
                  is_ssl: bool = False):
-        """
-        Args:
-            image_paths (list): List of absolute file paths to the images.
-            labels (list, optional): List of integer labels (0=Background, 1=Fungal, 2=Bacterial).
-            bounding_boxes (list, optional): List of [x_min, y_min, x_max, y_max] arrays for the grains.
-            subtypes (list, optional): List of integer labels identifying specific pathogen strains for few-shot learning.
-            transform (callable, optional): Albumentations or Torchvision transforms to apply.
-            use_macenko (bool): Whether to apply Macenko stain normalization.
-            is_ssl (bool): If true, ignores labels and uses SimCLR self-supervised representation learning output transforms.
-        """
         self.image_paths = image_paths
         self.labels = labels
         self.bounding_boxes = bounding_boxes
@@ -49,7 +36,6 @@ class MycetomaDataset(Dataset):
         self.use_macenko = use_macenko
         self.is_ssl = is_ssl
         
-        # Validations for supervised multi-task runs
         if not is_ssl and labels is not None:
             assert len(labels) == len(image_paths)
             if bounding_boxes is not None:
@@ -59,11 +45,7 @@ class MycetomaDataset(Dataset):
 
     @classmethod
     def from_ssl_directories(cls, root_dirs: list, **kwargs):
-        """
-        Builds a single vast SSL dataset out of multiple external dataset folders.
-        Args:
-            root_dirs: List of paths to datasets (e.g. ['data/LC25000', 'data/OpenFungi'])
-        """
+        """Build SSL dataset from directories."""
         all_paths = []
         for d in root_dirs:
             if os.path.isdir(d):
@@ -71,7 +53,6 @@ class MycetomaDataset(Dataset):
             else:
                 print(f"Warning: SSL directory {d} not found.")
                 
-        # Force is_ssl to true and labels to None
         kwargs['is_ssl'] = True
         return cls(image_paths=all_paths, labels=None, bounding_boxes=None, subtypes=None, **kwargs)
 
@@ -81,7 +62,6 @@ class MycetomaDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         img_path = self.image_paths[idx]
         
-        # Load image via cv2 to apply numpy-based Macenko
         image = cv2.imread(img_path)
         if image is None:
             raise FileNotFoundError(f"Cannot load image at {img_path}")
@@ -92,15 +72,12 @@ class MycetomaDataset(Dataset):
             image = apply_macenko(image)
 
         if self.is_ssl:
-            # SSL Transform (SimCLR block expects PIL images)
             pil_image = Image.fromarray(image)
             view1, view2 = self.transform(pil_image)
             return {"view1": view1, "view2": view2}
 
-        # Multi-task Supervised Flow
         out = {}
         
-        # apply albumentations
         if self.transform:
             augmented = self.transform(image=image)
             out["image"] = augmented["image"]
@@ -111,25 +88,16 @@ class MycetomaDataset(Dataset):
             out["label"] = torch.tensor(self.labels[idx], dtype=torch.long)
             
         if self.bounding_boxes is not None:
-            # Box structure expected: [x_min, y_min, x_max, y_max]
             out["bbox"] = torch.tensor(self.bounding_boxes[idx], dtype=torch.float32)
             
         if self.subtypes is not None:
             out["subtype"] = torch.tensor(self.subtypes[idx], dtype=torch.long)
             
         return out
+
 class MultiDatasetWrapper(Dataset):
-    """
-    Wrapper for multiple datasets to handle balanced sampling.
-    Useful when one dataset (like LC25000) is much larger than another (OpenFungi).
-    """
+    """Balanced sampling across datasets."""
     def __init__(self, datasets: list, samples_per_dataset: Optional[int] = None):
-        """
-        Args:
-            datasets: List of Dataset objects.
-            samples_per_dataset: If set, each dataset will contribute exactly this many samples 
-                                per epoch (by looping or subsetting).
-        """
         self.datasets = datasets
         self.samples_per_dataset = samples_per_dataset
         
@@ -145,11 +113,10 @@ class MultiDatasetWrapper(Dataset):
         if self.samples_per_dataset is not None:
             dataset_idx = idx // self.samples_per_dataset
             sample_idx = idx % self.samples_per_dataset
-            # Loop around if dataset is smaller than samples_per_dataset
+            # Loop if dataset smaller
             sample_idx = sample_idx % len(self.datasets[dataset_idx])
             return self.datasets[dataset_idx][sample_idx]
         else:
-            # Simple concatenation logic
             curr_idx = idx
             for d in self.datasets:
                 if curr_idx < len(d):

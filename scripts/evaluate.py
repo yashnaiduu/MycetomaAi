@@ -1,4 +1,5 @@
 import argparse
+import logging
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
@@ -9,15 +10,17 @@ from src.models.backbone import ResNet50CBAM
 from src.models.multi_task_head import MultiTaskHeads
 from src.evaluation.metrics import compute_metrics
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 def main(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Evaluating on device: {device}")
+    logger.info(f"Evaluating on device: {device}")
     
-    # 1. Build composite network structure mirroring training script
     class FullModel(torch.nn.Module):
         def __init__(self):
              super().__init__()
-             self.backbone = ResNet50CBAM(pretrained=False) # Load locally instead
+             self.backbone = ResNet50CBAM(pretrained=False)
              self.heads = MultiTaskHeads(in_features=2048, num_classes=3, num_subtypes=10)
              
         def forward(self, x):
@@ -26,19 +29,19 @@ def main(args):
              
     model = FullModel().to(device)
     
-    # Load weights
     try:
-        model.load_state_dict(torch.load(args.model_path, map_location=device))
-        print(f"Successfully loaded model weights from {args.model_path}")
+        checkpoint = torch.load(args.model_path, map_location=device, weights_only=True)
+        state_dict = checkpoint["model"] if "model" in checkpoint else checkpoint
+        model.load_state_dict(state_dict)
+        logger.info(f"Loaded model weights from {args.model_path}")
     except FileNotFoundError:
-        print(f"Error: Model weights not found at {args.model_path}")
-        print("Please provide a valid path or run scripts/train.py first.")
+        logger.error(f"Model weights not found at {args.model_path}")
+        logger.error("Run scripts/train.py first.")
         return
         
     model.eval()
     
-    # 2. Setup Data Loading (Dummy for now until real data is supplied)
-    print("Initializing test dataset mapping...")
+    logger.info("Initializing test dataset...")
     dummy_paths = [f"test_dummy_{i}.jpg" for i in range(20)]
     labels = np.random.randint(0, 3, 20).tolist()
     boxes = [[0.1, 0.1, 0.8, 0.8]] * 20
@@ -48,7 +51,6 @@ def main(args):
     # test_ds = MycetomaDataset(dummy_paths, labels, boxes, subtypes, transform=transforms['test'])
     # test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
     
-    print("Beginning inference pass over the test set...")
     all_preds_class = []
     all_targets_class = []
     all_probs_class = []
@@ -67,18 +69,16 @@ def main(args):
     #         all_targets_class.extend(class_targs.cpu().numpy())
     #         all_probs_class.extend(probs.cpu().numpy())
             
-    print("Aggregating multi-task evaluation metrics...")
     # metrics = compute_metrics(
     #     y_true=all_targets_class, 
     #     y_pred=all_preds_class, 
     #     y_prob=np.array(all_probs_class)
     # )
     
-    # print("\n=== Clinical Evaluation Results ===")
     # for k, v in metrics.items():
-    #     print(f"{k}: {v:.4f}")
+    #     logger.info(f"{k}: {v:.4f}")
         
-    print("Done. Update the mock data generator with actual paths to yield true clinical results.")
+    logger.info("Done. Replace dummy data with actual test paths for real evaluation.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Mycetoma AI Evaluation Pipeline")
