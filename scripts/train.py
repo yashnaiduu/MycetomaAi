@@ -15,7 +15,7 @@ from src.data.dataset import MycetomaDataset, MultiDatasetWrapper, get_image_pat
 from src.data.transforms import get_supervised_transforms, SimCLRTransform
 from src.models.model import MycetomaAIModel
 from src.training.trainer import MultiTaskTrainer
-from src.training.ssl_pretrainer import SSLPre Trainer
+from src.training.ssl_pretrainer import SSLPreTrainer
 
 def set_seed(seed: int, deterministic: bool = False) -> None:
     random.seed(seed)
@@ -28,10 +28,9 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
     else:
         torch.backends.cudnn.benchmark = True
 
-
 def load_config(path: str) -> Dict[str, Any]:
     with open(path, "r") as f:
-        return yaml.safe_load(f) or {}  
+        return yaml.safe_load(f) or {}
 
 def merge_config(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(base)
@@ -127,11 +126,14 @@ def main(args):
     if "log_dir" not in config or not config["log_dir"]:
         config["log_dir"] = "logs"
 
-    log_path = configure_logging(config["log_dir"], config["run_id"])
+    log_path = configure_logging(config["log_dir"], config["run_id"])  
     logger = logging.getLogger(__name__)
 
     if "stage" not in config or not config["stage"]:
         raise ValueError("stage is required (pretrain or finetune)")
+
+    if not config.get("checkpoint_dir"):
+        config["checkpoint_dir"] = "checkpoints/ssl" if config["stage"] == "pretrain" else "checkpoints/multitask"
 
     if config.get("save_config") and args.config is None:
         os.makedirs("configs", exist_ok=True)
@@ -197,7 +199,7 @@ def main(args):
             weight_decay=float(config.get("weight_decay", 1e-4)),
         )
 
-        resume_path = resolve_resume_path(config.get("resume_from"), config.get("checkpoint_dir", "checkpoints/ssl"))
+        resume_path = resolve_resume_path(config.get("resume_from"), config["checkpoint_dir"])
 
         pretrainer = SSLPreTrainer(
             model,
@@ -205,7 +207,7 @@ def main(args):
             dataloader,
             device,
             epochs=int(config.get("epochs", 100)),
-            save_dir=config.get("checkpoint_dir", "checkpoints/ssl"),
+            save_dir=config["checkpoint_dir"],
             checkpoint_every_n_epochs=int(config.get("checkpoint_every_n_epochs", 10)),
             resume_from=resume_path,
             grad_accum_steps=int(config.get("grad_accum_steps", 1)),
@@ -285,7 +287,7 @@ def main(args):
             weight_decay=float(config.get("weight_decay", 1e-2)),
         )
 
-        resume_path = resolve_resume_path(config.get("resume_from"), config.get("checkpoint_dir", "checkpoints/multitask"))
+        resume_path = resolve_resume_path(config.get("resume_from"), config["checkpoint_dir"])
 
         trainer = MultiTaskTrainer(
             model,
@@ -294,7 +296,7 @@ def main(args):
             val_loader,
             device,
             epochs=int(config.get("epochs", 50)),
-            save_dir=config.get("checkpoint_dir", "checkpoints/multitask"),
+            save_dir=config["checkpoint_dir"],
             checkpoint_every_n_epochs=int(config.get("checkpoint_every_n_epochs", 5)),
             resume_from=resume_path,
             grad_accum_steps=int(config.get("grad_accum_steps", 1)),
@@ -316,8 +318,8 @@ def main(args):
         "log": log_path,
         "checkpoint_dir": config.get("checkpoint_dir"),
     }
-    os.makedirs(config.get("checkpoint_dir", "checkpoints"), exist_ok=True)
-    manifest_path = os.path.join(config.get("checkpoint_dir", "checkpoints"), "manifest.json")
+    os.makedirs(config["checkpoint_dir"], exist_ok=True)
+    manifest_path = os.path.join(config["checkpoint_dir"], "manifest.json")
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
     logger.info("Manifest saved to %s", manifest_path)
