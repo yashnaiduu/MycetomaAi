@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mycetomai"
+version = "0.1.0"
+description = "AI-powered Mycetoma diagnostics from histopathology images"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[project.scripts]
+mycetomai-train = "scripts.train:cli"
+mycetomai-eval  = "scripts.evaluate:cli"
+
+[tool.setuptools.packages.find]
+where   = ["."]
+include = ["src*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths  = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
