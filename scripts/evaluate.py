@@ -80,11 +80,14 @@ def main(args):
         
     logger.info("Done. Replace dummy data with actual test paths for real evaluation.")
 
-if __name__ == "__main__":
+def cli():
     parser = argparse.ArgumentParser(description="Mycetoma AI Evaluation Pipeline")
-    parser.add_argument("--model_path", type=str, default="checkpoints/multitask/best_multi_task_model.pth", 
+    parser.add_argument("--model_path", type=str, default="checkpoints/multitask/best_multi_task_model.pth",
                         help="Path to trained PyTorch .pth file")
     parser.add_argument("--batch_size", type=int, default=16)
     args = parser.parse_args()
-    
     main(args)
+
+
+if __name__ == "__main__":
+    cli()

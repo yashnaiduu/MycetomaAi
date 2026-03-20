@@ -325,7 +325,7 @@ def main(args):
     logger.info("Manifest saved to %s", manifest_path)
 
 
-if __name__ == "__main__":
+def cli():
     parser = argparse.ArgumentParser(description="Mycetoma AI Training Pipeline")
     parser.add_argument("--config", type=str, default=None, help="Path to YAML config")
     parser.add_argument("--stage", type=str, choices=["pretrain", "finetune"], default=None)
@@ -352,6 +352,9 @@ if __name__ == "__main__":
     parser.add_argument("--run_id", type=str, default=None)
     parser.add_argument("--log_dir", type=str, default=None)
     parser.add_argument("--early_stop_patience", type=int, default=None)
-
     args = parser.parse_args()
     main(args)
+
+
+if __name__ == "__main__":
+    cli()

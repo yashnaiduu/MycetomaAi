@@ -1,0 +1,35 @@
+# Mycetoma AI – default training configuration
+# Override individual keys via CLI arguments or by pointing --config at this file.
+
+# ── Data paths ──────────────────────────────────────────────────────────────
+pretrain_data_dir: data/pretrain   # root containing per-subset sub-directories
+finetune_data_dir: data/finetune   # flat image directory for supervised fine-tuning
+
+# ── Training stages ─────────────────────────────────────────────────────────
+stage: finetune                    # pretrain | finetune
+
+# ── Hyper-parameters ────────────────────────────────────────────────────────
+batch_size: 32
+lr: 0.0001
+epochs: 50
+num_workers: 4
+grad_accum_steps: 1
+early_stop_patience: 10
+
+# ── Precision ───────────────────────────────────────────────────────────────
+precision: fp16                    # fp16 | bf16 | fp32
+
+# ── Checkpoint directories ──────────────────────────────────────────────────
+checkpoint_dir: checkpoints/multitask
+checkpoint_every_n_epochs: 5
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+log_dir: logs
+seed: 42
+deterministic: false
+
+# ── Weights & Biases ────────────────────────────────────────────────────────
+wandb: false
+wandb_project: mycetoma-ai
+wandb_name: null
+wandb_tags: null
