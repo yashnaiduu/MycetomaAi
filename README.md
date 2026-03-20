@@ -62,9 +62,9 @@ MycetomaAi/
 git clone https://github.com/yashnaiduu/MycetomaAi.git
 cd MycetomaAi
 
-# GPU (CUDA 12.1)
-pip install torch==2.2.1+cu121 torchvision==0.17.1+cu121 torchaudio==2.2.1+cu121 \
-    --extra-index-url https://download.pytorch.org/whl/cu121
+# GPU (CUDA 12.4)
+pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124 \
+    --extra-index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 pip install -e .
 ```
@@ -115,7 +115,7 @@ Or run the individual steps manually:
 
 ```bash
 # Install CPU PyTorch
-pip install torch==2.2.1 torchvision==0.17.1 torchaudio==2.2.1 \
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
     --index-url https://download.pytorch.org/whl/cpu
 
 # Install remaining dependencies
