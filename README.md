@@ -2,6 +2,16 @@
 
 A research-grade AI system for diagnosing Mycetoma from histopathology microscopic images. This system implements a multi-component deep learning pipeline engineered specifically to handle medical data scarcity.
 
+## 🏢 Is this repository enterprise-grade?
+
+Not yet. This project is currently **research-grade** and optimized for experimentation/training workflows.
+
+For enterprise production use, you would typically still need items such as:
+- Hardened security controls (threat modeling, secret management, SAST/DAST policy gates)
+- Compliance and governance artifacts (clinical validation, audit trails, regulated deployment controls)
+- Production operations maturity (SLOs/SLIs, incident response, observability at scale, HA/DR)
+- Formal release management (versioned model registry, rollback strategy, change approvals)
+
 ## 🚀 Training on Google Colab
 
 Use the provided `notebooks/colab_training_setup.ipynb` for cloud training. 
