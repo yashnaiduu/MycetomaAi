@@ -1,0 +1,40 @@
+pretrain:
+  epochs: 100
+  batch_size: 16
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  scheduler: cosine
+  temperature: 0.1
+  checkpoint_every: 10
+  save_dir: checkpoints/ssl
+  data_dir: data/pretrain
+
+finetune:
+  epochs: 50
+  batch_size: 16
+  lr: 1.0e-5
+  weight_decay: 1.0e-2
+  scheduler: cosine
+  label_smoothing: 0.1
+  save_dir: checkpoints/multitask
+  data_dir: data/finetune/MyData
+
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.001
+
+  kfold:
+    enabled: true
+    n_splits: 5
+
+  augmentation:
+    mixup_alpha: 0.2
+    cutmix_alpha: 1.0
+    mixup_prob: 0.3
+
+device: auto
+num_workers: 4
+seed: 42
+mixed_precision: true
+max_grad_norm: 1.0

@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d2e;
+}
+
+body {
+  background: var(--bg-primary);
+  color: #e5e7eb;
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #374151 transparent;
+}
