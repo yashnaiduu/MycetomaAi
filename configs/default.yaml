@@ -1,27 +1,54 @@
-# Mycetoma AI – default training configuration
-# Override individual keys via CLI arguments or by pointing --config at this file.
+# Mycetoma AI — Training Configuration
+# All behavior is controlled here. No hardcoded values in source.
 
-# ── Data paths ──────────────────────────────────────────────────────────────
-pretrain_data_dir: data/pretrain   # root containing per-subset sub-directories
-finetune_data_dir: data/finetune   # flat image directory for supervised fine-tuning
+# ── Data ────────────────────────────────────────────────────────────────────
+pretrain_data_dir: data/pretrain
+finetune_data_dir: data/finetune
+annotations_csv: null
 
-# ── Training stages ─────────────────────────────────────────────────────────
+# ── Stage ───────────────────────────────────────────────────────────────────
 stage: finetune                    # pretrain | finetune
 
-# ── Hyper-parameters ────────────────────────────────────────────────────────
+# ── Model ───────────────────────────────────────────────────────────────────
+num_classes: 3
+num_subtypes: 10
+pretrained_backbone: true
+freeze_backbone: false
+use_ssl_pretrained: false          # load SSL checkpoint before finetuning
+
+# ── Data pipeline ───────────────────────────────────────────────────────────
+use_real_masks: false              # true = load mask_path from CSV; false = generate pseudo-masks
+generate_masks: true               # generate Otsu pseudo-masks when real masks unavailable
+use_macenko: true                  # stain normalization
+image_size: 224
+
+# ── Training ────────────────────────────────────────────────────────────────
 batch_size: 32
 lr: 0.0001
 epochs: 50
 num_workers: 4
 grad_accum_steps: 1
 early_stop_patience: 10
+weight_decay: 0.01
+
+# ── Loss weights ────────────────────────────────────────────────────────────
+loss_alpha: 1.0                    # classification weight
+loss_beta: 0.5                     # detection weight
+loss_gamma: 0.5                    # subtype weight
+loss_delta: 0.5                    # segmentation weight
+label_smoothing: 0.1
 
 # ── Precision ───────────────────────────────────────────────────────────────
 precision: fp16                    # fp16 | bf16 | fp32
 
-# ── Checkpoint directories ──────────────────────────────────────────────────
+# ── Checkpoints ─────────────────────────────────────────────────────────────
+checkpoint: null                   # SSL checkpoint path for finetune init
 checkpoint_dir: checkpoints/multitask
 checkpoint_every_n_epochs: 5
+
+# ── Output ──────────────────────────────────────────────────────────────────
+save_predictions: true
+output_dir: results
 
 # ── Logging ─────────────────────────────────────────────────────────────────
 log_dir: logs

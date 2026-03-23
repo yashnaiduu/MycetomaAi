@@ -3,19 +3,17 @@ import argparse
 import json
 import logging
 import os
-import random
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
-from src.data.dataset import MycetomaDataset, get_image_paths
+from src.data.dataset import MycetomaDataset, get_image_paths, infer_labels_from_folders
 from src.data.transforms import get_supervised_transforms
 from src.models.backbone import ResNet50CBAM
 from src.models.baselines import ResNet50Baseline, DenseNet121Baseline
-from src.models.multi_task_head import MultiTaskHeads
 from src.models.model import MycetomaAIModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -36,15 +34,15 @@ class CBAMClassifier(torch.nn.Module):
         return {"classification": self.fc(out)}
 
 
-def build_model(variant, device):
+def build_model(variant, device, num_classes=3):
     if variant == "resnet50":
-        return ResNet50Baseline(pretrained=False).to(device)
+        return ResNet50Baseline(num_classes=num_classes, pretrained=False).to(device)
     elif variant == "densenet121":
-        return DenseNet121Baseline(pretrained=False).to(device)
+        return DenseNet121Baseline(num_classes=num_classes, pretrained=False).to(device)
     elif variant == "cbam":
-        return CBAMClassifier(pretrained=False).to(device)
+        return CBAMClassifier(num_classes=num_classes, pretrained=False).to(device)
     elif variant == "cbam_aug":
-        return CBAMClassifier(pretrained=False).to(device)
+        return CBAMClassifier(num_classes=num_classes, pretrained=False).to(device)
     elif variant == "full":
         return MycetomaAIModel(mode="finetune", pretrained_backbone=False).to(device)
     raise ValueError(f"Unknown variant: {variant}")
@@ -92,37 +90,50 @@ def evaluate(model, loader, device, num_classes=3):
 
 def run_experiment(variant, data_dir, epochs, batch_size, device):
     logger.info("=== %s ===", variant)
-    img_paths = get_image_paths(data_dir)
-    if not img_paths:
-        logger.error("No images in %s", data_dir)
-        return {}
+    paths, labels, class_map = infer_labels_from_folders(data_dir)
+    num_classes = len(class_map) if class_map else 3
 
-    labels = [random.randint(0, 2) for _ in range(len(img_paths))]
+    if not paths:
+        paths = get_image_paths(data_dir)
+        if not paths:
+            logger.error("No images in %s", data_dir)
+            return {}
+        labels = [0] * len(paths)
+        num_classes = 1
+        logger.warning("No class folders found — single-class fallback")
+
+    logger.info("Found %d images, %d classes", len(paths), num_classes)
+
     use_aug = variant in ("cbam_aug", "full")
     transforms = get_supervised_transforms()
+    labels_arr = np.array(labels)
 
-    skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+    n_splits = min(3, len(set(labels)))
+    if n_splits < 2:
+        logger.warning("Insufficient classes for cross-validation")
+        return {}
+
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
     fold_metrics = []
 
-    for fold, (train_idx, val_idx) in enumerate(skf.split(img_paths, labels)):
-        logger.info("  Fold %d/3", fold + 1)
-        paths_arr = np.array(img_paths)
-        labels_arr = np.array(labels)
+    for fold, (train_idx, val_idx) in enumerate(skf.split(paths, labels)):
+        logger.info("  Fold %d/%d", fold + 1, n_splits)
+        paths_arr = np.array(paths)
 
         t_key = "train" if use_aug else "val"
         train_ds = MycetomaDataset(
             paths_arr[train_idx].tolist(), labels_arr[train_idx].tolist(),
-            transform=transforms[t_key],
+            transform=transforms[t_key], generate_masks=False,
         )
         val_ds = MycetomaDataset(
             paths_arr[val_idx].tolist(), labels_arr[val_idx].tolist(),
-            transform=transforms["val"],
+            transform=transforms["val"], generate_masks=False,
         )
 
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2)
         val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2)
 
-        model = build_model(variant, device)
+        model = build_model(variant, device, num_classes=max(num_classes, 3))
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
         criterion = torch.nn.CrossEntropyLoss()
 
@@ -131,7 +142,8 @@ def run_experiment(variant, data_dir, epochs, batch_size, device):
 
         metrics = evaluate(model, val_loader, device)
         fold_metrics.append(metrics)
-        logger.info("  Fold %d → acc=%.4f f1=%.4f auc=%.4f", fold + 1, metrics["accuracy"], metrics["f1"], metrics["auc"])
+        logger.info("  Fold %d → acc=%.4f f1=%.4f auc=%.4f",
+                     fold + 1, metrics["accuracy"], metrics["f1"], metrics["auc"])
 
     avg = {
         k: round(np.mean([m[k] for m in fold_metrics]), 4)
@@ -161,7 +173,6 @@ def main():
         json.dump(results, f, indent=2)
     logger.info("Results saved to %s", out_path)
 
-    # Print comparison table
     print("\n" + "=" * 55)
     print(f"{'Model':<15} {'Accuracy':>10} {'F1':>10} {'AUC':>10}")
     print("-" * 55)

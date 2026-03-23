@@ -17,6 +17,7 @@ from src.models.model import MycetomaAIModel
 from src.training.trainer import MultiTaskTrainer
 from src.training.ssl_pretrainer import SSLPreTrainer
 
+
 def set_seed(seed: int, deterministic: bool = False) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -28,9 +29,11 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
     else:
         torch.backends.cudnn.benchmark = True
 
+
 def load_config(path: str) -> Dict[str, Any]:
     with open(path, "r") as f:
         return yaml.safe_load(f) or {}
+
 
 def merge_config(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(base)
@@ -38,6 +41,7 @@ def merge_config(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, An
         if value is not None:
             merged[key] = value
     return merged
+
 
 def configure_logging(log_dir: str, run_id: str) -> str:
     os.makedirs(log_dir, exist_ok=True)
@@ -49,15 +53,15 @@ def configure_logging(log_dir: str, run_id: str) -> str:
     )
     return log_path
 
+
 def resolve_resume_path(resume_from: Optional[str], checkpoint_dir: str) -> Optional[str]:
     if not resume_from:
         return None
     if resume_from != "auto":
         return resume_from
     last_ckpt = os.path.join(checkpoint_dir, "last.pth")
-    if os.path.exists(last_ckpt):
-        return last_ckpt
-    return None
+    return last_ckpt if os.path.exists(last_ckpt) else None
+
 
 def init_wandb(config: Dict[str, Any]):
     if not config.get("wandb", False):
@@ -71,9 +75,10 @@ def init_wandb(config: Dict[str, Any]):
             config=config,
             resume="allow",
         )
-    except Exception as exc:  # pragma: no cover - best-effort logging
+    except Exception as exc:
         logging.getLogger(__name__).warning("W&B init failed: %s", exc)
         return None
+
 
 def discover_pretrain_roots(pretrain_data_dir: str) -> list:
     roots = []
@@ -86,6 +91,75 @@ def discover_pretrain_roots(pretrain_data_dir: str) -> list:
         roots = [pretrain_data_dir]
     return roots
 
+
+def load_finetune_data(config, logger):
+    finetune_dir = config.get("finetune_data_dir", "data/finetune")
+    csv_path = config.get("annotations_csv")
+    gen_masks = bool(config.get("generate_masks", True))
+    use_macenko = bool(config.get("use_macenko", True))
+    transforms = get_supervised_transforms(int(config.get("image_size", 224)))
+
+    if csv_path and os.path.exists(csv_path):
+        logger.info("Loading from CSV: %s", csv_path)
+        dataset = MycetomaDataset.from_csv(
+            csv_path, finetune_dir,
+            transform=transforms["train"],
+            generate_masks=gen_masks,
+            use_macenko=use_macenko,
+        )
+        num_imgs = len(dataset)
+        if num_imgs == 0:
+            return None, None, 0
+        indices = list(range(num_imgs))
+        random.shuffle(indices)
+        split = int(0.8 * num_imgs) or 1
+        train_ds = torch.utils.data.Subset(dataset, indices[:split])
+        val_ds = torch.utils.data.Subset(dataset, indices[split:])
+        return train_ds, val_ds, num_imgs
+
+    if not os.path.exists(finetune_dir):
+        logger.error("Finetune directory not found: %s", finetune_dir)
+        return None, None, 0
+
+    dataset, class_map = MycetomaDataset.from_directory(
+        finetune_dir,
+        transform=transforms["train"],
+        generate_masks=gen_masks,
+        use_macenko=use_macenko,
+    )
+
+    num_imgs = len(dataset)
+    if num_imgs == 0:
+        logger.error("No images found in %s", finetune_dir)
+        return None, None, 0
+
+    logger.info("Loaded %d images, classes: %s", num_imgs, class_map)
+
+    indices = list(range(num_imgs))
+    random.shuffle(indices)
+    split = int(0.8 * num_imgs) or 1
+
+    train_paths = [dataset.image_paths[i] for i in indices[:split]]
+    train_labels = [dataset.labels[i] for i in indices[:split]]
+    val_paths = [dataset.image_paths[i] for i in indices[split:]]
+    val_labels = [dataset.labels[i] for i in indices[split:]]
+
+    train_ds = MycetomaDataset(
+        train_paths, train_labels,
+        transform=transforms["train"],
+        generate_masks=gen_masks,
+        use_macenko=use_macenko,
+    )
+    val_ds = MycetomaDataset(
+        val_paths, val_labels,
+        transform=transforms["val"],
+        generate_masks=gen_masks,
+        use_macenko=use_macenko,
+    )
+
+    return train_ds, val_ds, num_imgs
+
+
 def main(args):
     config: Dict[str, Any] = {}
     if args.config:
@@ -95,6 +169,7 @@ def main(args):
         "stage": args.stage,
         "pretrain_data_dir": args.pretrain_data_dir,
         "finetune_data_dir": args.finetune_data_dir,
+        "annotations_csv": args.annotations_csv,
         "checkpoint": args.checkpoint,
         "batch_size": args.batch_size,
         "epochs": args.epochs,
@@ -116,6 +191,7 @@ def main(args):
         "run_id": args.run_id,
         "log_dir": args.log_dir,
         "early_stop_patience": args.early_stop_patience,
+        "freeze_backbone": args.freeze_backbone,
     }
 
     config = merge_config(config, cli_override)
@@ -126,7 +202,7 @@ def main(args):
     if "log_dir" not in config or not config["log_dir"]:
         config["log_dir"] = "logs"
 
-    log_path = configure_logging(config["log_dir"], config["run_id"])  
+    log_path = configure_logging(config["log_dir"], config["run_id"])
     logger = logging.getLogger(__name__)
 
     if "stage" not in config or not config["stage"]:
@@ -134,13 +210,6 @@ def main(args):
 
     if not config.get("checkpoint_dir"):
         config["checkpoint_dir"] = "checkpoints/ssl" if config["stage"] == "pretrain" else "checkpoints/multitask"
-
-    if config.get("save_config") and args.config is None:
-        os.makedirs("configs", exist_ok=True)
-        config_path = os.path.join("configs", f"run_{config['run_id']}.yaml")
-        with open(config_path, "w") as f:
-            yaml.safe_dump(config, f)
-        logger.info("Saved config: %s", config_path)
 
     seed = int(config.get("seed", 42))
     set_seed(seed, bool(config.get("deterministic", False)))
@@ -152,8 +221,7 @@ def main(args):
         torch.backends.cuda.matmul.allow_tf32 = True
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info("Using device: %s", device)
-    logger.info("Run ID: %s", config["run_id"])
+    logger.info("Device: %s | Run: %s", device, config["run_id"])
 
     wandb_run = init_wandb(config)
 
@@ -161,27 +229,26 @@ def main(args):
         logger.info("=== Self-Supervised Pretraining ===")
         pretrain_dir = config.get("pretrain_data_dir", "data/pretrain")
         root_dirs = discover_pretrain_roots(pretrain_dir)
-        logger.info("Pretraining directories: %s", root_dirs)
 
         datasets = []
         for rd in root_dirs:
             img_paths = get_image_paths(rd)
-            if len(img_paths) > 0:
-                logger.info("  Found %s images in %s", len(img_paths), os.path.basename(rd))
+            if img_paths:
+                logger.info("  %s: %d images", os.path.basename(rd), len(img_paths))
                 datasets.append(
                     MycetomaDataset(img_paths, is_ssl=True, transform=SimCLRTransform())
                 )
 
         if not datasets:
-            logger.error("No images found in pretraining directories.")
+            logger.error("No images found for pretraining.")
             return
 
         dataset = MultiDatasetWrapper(datasets, samples_per_dataset=config.get("samples_per_dataset"))
-        logger.info("Total balanced SSL dataset size: %s", len(dataset))
+        logger.info("SSL dataset size: %d", len(dataset))
 
         if config.get("verify_data"):
             sample = dataset[0]
-            logger.info("Data OK. Sample view1 shape: %s", sample["view1"].shape)
+            logger.info("View1 shape: %s", sample["view1"].shape)
             return
 
         dataloader = DataLoader(
@@ -202,10 +269,7 @@ def main(args):
         resume_path = resolve_resume_path(config.get("resume_from"), config["checkpoint_dir"])
 
         pretrainer = SSLPreTrainer(
-            model,
-            optimizer,
-            dataloader,
-            device,
+            model, optimizer, dataloader, device,
             epochs=int(config.get("epochs", 100)),
             save_dir=config["checkpoint_dir"],
             checkpoint_every_n_epochs=int(config.get("checkpoint_every_n_epochs", 10)),
@@ -219,82 +283,59 @@ def main(args):
     elif config["stage"] == "finetune":
         logger.info("=== Multi-Task Finetuning ===")
 
-        finetune_dir = config.get("finetune_data_dir", "data/finetune/MyData")
-        if not os.path.exists(finetune_dir):
-            logger.error("Finetune data directory '%s' not found.", finetune_dir)
+        train_ds, val_ds, num_imgs = load_finetune_data(config, logger)
+        if train_ds is None or num_imgs == 0:
             return
 
-        img_paths = get_image_paths(finetune_dir)
-        num_imgs = len(img_paths)
-        logger.info("Loading %s images from %s", num_imgs, finetune_dir)
-
-        # Placeholder labels until Mycetoma annotations arrive
-        labels = [random.choice([0, 1, 2]) for _ in range(num_imgs)]
-        boxes = [[0.1, 0.1, 0.8, 0.8] for _ in range(num_imgs)]
-        subtypes = [random.randint(0, 9) for _ in range(num_imgs)]
-
-        transforms = get_supervised_transforms()
-
-        random.shuffle(img_paths)
-        split_idx = int(0.8 * num_imgs)
-        if split_idx == 0 and num_imgs > 0:
-            split_idx = 1
-
-        train_ds = MycetomaDataset(
-            img_paths[:split_idx],
-            labels[:split_idx],
-            boxes[:split_idx],
-            subtypes[:split_idx],
-            transform=transforms["train"],
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=int(config.get("batch_size", 16)),
+            shuffle=True,
+            num_workers=int(config.get("num_workers", 4)),
         )
-        val_ds = MycetomaDataset(
-            img_paths[split_idx:],
-            labels[split_idx:],
-            boxes[split_idx:],
-            subtypes[split_idx:],
-            transform=transforms["val"],
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=int(config.get("batch_size", 16)),
+            shuffle=False,
+            num_workers=int(config.get("num_workers", 4)),
         )
 
-        if len(train_ds) > 0:
-            train_loader = DataLoader(
-                train_ds,
-                batch_size=int(config.get("batch_size", 16)),
-                shuffle=True,
-                num_workers=int(config.get("num_workers", 4)),
-            )
-            val_loader = DataLoader(
-                val_ds,
-                batch_size=int(config.get("batch_size", 16)),
-                shuffle=False,
-                num_workers=int(config.get("num_workers", 4)),
-            )
-        else:
-            logger.error("No images found for training split.")
+        if config.get("verify_data"):
+            sample = next(iter(train_loader))
+            logger.info("Image: %s", sample["image"].shape)
+            logger.info("Label: %s", sample.get("label"))
+            logger.info("Mask: %s", sample["mask"].shape if "mask" in sample else "N/A")
             return
 
-        model = MycetomaAIModel(mode="finetune").to(device)
+        pretrained_bb = bool(config.get("pretrained_backbone", True))
+        model = MycetomaAIModel(mode="finetune", pretrained_backbone=pretrained_bb).to(device)
 
         if config.get("checkpoint"):
             model.load_backbone(config["checkpoint"])
 
-        if config.get("verify_data"):
-            logger.info("Data verification OK for finetuning.")
-            return
+        if config.get("freeze_backbone", False):
+            for param in model.backbone.parameters():
+                param.requires_grad = False
+            logger.info("Backbone frozen")
 
         optimizer = torch.optim.AdamW(
-            model.parameters(),
+            filter(lambda p: p.requires_grad, model.parameters()),
             lr=float(config.get("lr", 1e-4)) * 0.1,
             weight_decay=float(config.get("weight_decay", 1e-2)),
         )
 
+        loss_kwargs = {
+            "alpha": float(config.get("loss_alpha", 1.0)),
+            "beta": float(config.get("loss_beta", 0.5)),
+            "gamma": float(config.get("loss_gamma", 0.5)),
+            "delta": float(config.get("loss_delta", 0.5)),
+            "label_smoothing": float(config.get("label_smoothing", 0.1)),
+        }
+
         resume_path = resolve_resume_path(config.get("resume_from"), config["checkpoint_dir"])
 
         trainer = MultiTaskTrainer(
-            model,
-            optimizer,
-            train_loader,
-            val_loader,
-            device,
+            model, optimizer, train_loader, val_loader, device,
             epochs=int(config.get("epochs", 50)),
             save_dir=config["checkpoint_dir"],
             checkpoint_every_n_epochs=int(config.get("checkpoint_every_n_epochs", 5)),
@@ -303,6 +344,7 @@ def main(args):
             use_amp=(precision != "fp32"),
             early_stop_patience=config.get("early_stop_patience"),
             wandb_run=wandb_run,
+            loss_kwargs=loss_kwargs,
         )
         trainer.train()
 
@@ -317,6 +359,7 @@ def main(args):
         "stage": config["stage"],
         "log": log_path,
         "checkpoint_dir": config.get("checkpoint_dir"),
+        "config": {k: v for k, v in config.items() if not k.startswith("wandb")},
     }
     os.makedirs(config["checkpoint_dir"], exist_ok=True)
     manifest_path = os.path.join(config["checkpoint_dir"], "manifest.json")
@@ -326,15 +369,16 @@ def main(args):
 
 
 def cli():
-    parser = argparse.ArgumentParser(description="Mycetoma AI Training Pipeline")
-    parser.add_argument("--config", type=str, default=None, help="Path to YAML config")
+    parser = argparse.ArgumentParser(description="Mycetoma AI Training")
+    parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--stage", type=str, choices=["pretrain", "finetune"], default=None)
     parser.add_argument("--pretrain_data_dir", type=str, default=None)
     parser.add_argument("--finetune_data_dir", type=str, default=None)
-    parser.add_argument("--checkpoint", type=str, default=None, help="Path to pretrained checkpoint")
+    parser.add_argument("--annotations_csv", type=str, default=None)
+    parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=None)
-    parser.add_argument("--samples_per_dataset", type=int, default=None, help="Balance factor for SSL")
+    parser.add_argument("--samples_per_dataset", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--verify_data", action="store_true")
     parser.add_argument("--num_workers", type=int, default=None)
@@ -352,6 +396,7 @@ def cli():
     parser.add_argument("--run_id", type=str, default=None)
     parser.add_argument("--log_dir", type=str, default=None)
     parser.add_argument("--early_stop_patience", type=int, default=None)
+    parser.add_argument("--freeze_backbone", action="store_true")
     args = parser.parse_args()
     main(args)
 

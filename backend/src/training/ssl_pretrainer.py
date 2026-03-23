@@ -1,6 +1,6 @@
 import logging
 import torch
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import os
@@ -35,7 +35,7 @@ class SSLPreTrainer:
             
             self.optimizer.zero_grad(set_to_none=True)
             
-            with autocast(enabled=(self.device.type == 'cuda')):
+            with autocast("cuda", enabled=(self.device.type == 'cuda')):
                 out1 = self.model(view1)
                 out2 = self.model(view2)
                 loss = self.criterion(out1["fused_proj"], out2["fused_proj"])

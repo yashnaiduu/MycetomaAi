@@ -1,6 +1,6 @@
 import logging
 import torch
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import os
@@ -57,7 +57,7 @@ class MultiTaskTrainer:
 
             self.optimizer.zero_grad(set_to_none=True)
 
-            with autocast(enabled=(self.device.type == "cuda")):
+            with autocast("cuda", enabled=(self.device.type == "cuda")):
                 preds = self.model(images)
                 loss, loss_dict = self.criterion(preds, targets)
 
@@ -89,7 +89,7 @@ class MultiTaskTrainer:
             images = batch["image"].to(self.device, non_blocking=True)
             targets = {k: v.to(self.device, non_blocking=True) for k, v in batch.items() if k != "image"}
 
-            with autocast(enabled=(self.device.type == "cuda")):
+            with autocast("cuda", enabled=(self.device.type == "cuda")):
                 preds = self.model(images)
                 loss, _ = self.criterion(preds, targets)
 

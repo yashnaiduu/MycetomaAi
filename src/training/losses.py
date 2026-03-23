@@ -25,30 +25,40 @@ class InfoNCE(nn.Module):
         return -torch.log(pos / neg_sum).mean()
 
 
-class DiceBCELoss(nn.Module):
-    """Combined Dice + BCE for segmentation."""
+class DiceLoss(nn.Module):
+    """Soft Dice loss."""
     def __init__(self, smooth=1.0):
         super().__init__()
         self.smooth = smooth
 
     def forward(self, pred, target):
-        bce = F.binary_cross_entropy(pred, target, reduction='mean')
-        pred_flat = pred.view(-1)
-        target_flat = target.view(-1)
+        pred_flat = pred.reshape(-1)
+        target_flat = target.reshape(-1)
         intersection = (pred_flat * target_flat).sum()
-        dice = 1 - (2. * intersection + self.smooth) / (
+        return 1 - (2. * intersection + self.smooth) / (
             pred_flat.sum() + target_flat.sum() + self.smooth
         )
-        return bce + dice
+
+
+class DiceBCELoss(nn.Module):
+    """Combined Dice + BCE."""
+    def __init__(self, smooth=1.0):
+        super().__init__()
+        self.dice = DiceLoss(smooth)
+
+    def forward(self, pred, target):
+        bce = F.binary_cross_entropy(pred, target, reduction='mean')
+        return bce + self.dice(pred, target)
 
 
 class MultiTaskLoss(nn.Module):
-    """Weighted multi-task loss with segmentation."""
-    def __init__(self, alpha=1.0, beta=0.5, gamma=0.5, delta=0.3):
+    """Joint classification + segmentation loss."""
+    def __init__(self, alpha=1.0, beta=0.5, gamma=0.5, delta=0.5,
+                 label_smoothing=0.1):
         super().__init__()
-        self.class_criterion = nn.CrossEntropyLoss()
+        self.class_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
         self.detect_criterion = nn.SmoothL1Loss()
-        self.subtype_criterion = nn.CrossEntropyLoss()
+        self.subtype_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
         self.seg_criterion = DiceBCELoss()
 
         self.alpha = alpha

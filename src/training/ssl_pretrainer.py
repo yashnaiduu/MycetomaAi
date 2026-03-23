@@ -3,7 +3,7 @@ import os
 from typing import Optional
 
 import torch
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 
@@ -42,7 +42,8 @@ class SSLPreTrainer:
 
         self.criterion = InfoNCE(temperature=0.1).to(device)
         self.scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
-        self.scaler = GradScaler(enabled=self.use_amp)
+        scaler_device = "cuda" if device.type == "cuda" else "cpu"
+        self.scaler = GradScaler(scaler_device, enabled=self.use_amp)
         self.max_grad_norm = 1.0
         self.start_epoch = 0
         self.global_step = 0
@@ -83,10 +84,10 @@ class SSLPreTrainer:
             try:
                 self.scaler.load_state_dict(checkpoint["scaler"])
             except Exception:
-                logger.warning("Failed to load AMP scaler state; continuing without it.")
+                logger.warning("Failed to load AMP scaler state.")
         self.start_epoch = int(checkpoint.get("epoch", 0))
         self.global_step = int(checkpoint.get("global_step", 0))
-        logger.info("Resumed SSL pretraining from %s (epoch %s)", path, self.start_epoch)
+        logger.info("Resumed SSL from %s (epoch %s)", path, self.start_epoch)
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -99,7 +100,8 @@ class SSLPreTrainer:
             view1 = batch["view1"].to(self.device, non_blocking=True)
             view2 = batch["view2"].to(self.device, non_blocking=True)
 
-            with autocast(enabled=self.use_amp):
+            amp_device = "cuda" if self.device.type == "cuda" else "cpu"
+            with autocast(amp_device, enabled=self.use_amp):
                 out1 = self.model(view1)
                 out2 = self.model(view2)
                 loss = self.criterion(out1["fused_proj"], out2["fused_proj"])

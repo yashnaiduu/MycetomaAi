@@ -1,156 +1,85 @@
 # Mycetoma AI Diagnostics
 
-A research-grade AI system for diagnosing Mycetoma from histopathology microscopic images. This system implements a multi-component deep learning pipeline engineered specifically to handle medical data scarcity.
+AI system for diagnosing Mycetoma from histopathology images. Multi-task deep learning pipeline handling medical data scarcity via self-supervised learning and attention mechanisms.
 
-## 🏢 Is this repository enterprise-grade?
+## Research Contributions
 
-Not yet. This project is currently **research-grade** and optimized for experimentation/training workflows.
+**Self-Supervised Pretraining (SimCLR + DINOv2)** — Hybrid contrastive encoder fusing SimCLR projections with frozen DINOv2 features. Learns histopathology representations from unlabeled images (~864 images).
 
-For enterprise production use, you would typically still need items such as:
-- Hardened security controls (threat modeling, secret management, SAST/DAST policy gates)
-- Compliance and governance artifacts (clinical validation, audit trails, regulated deployment controls)
-- Production operations maturity (SLOs/SLIs, incident response, observability at scale, HA/DR)
-- Formal release management (versioned model registry, rollback strategy, change approvals)
+**Attention-Based Classification (CBAM)** — Channel + spatial attention integrated into every ResNet50 block. Guides the network toward grain morphology patterns.
 
-## 🚀 Training on Google Colab
+**Multi-Task Learning** — Joint optimization of classification (CrossEntropy), segmentation (DiceBCE), detection (SmoothL1), and subtype classification through a shared backbone with configurable loss weights.
 
-Use the provided `notebooks/colab_training_setup.ipynb` for cloud training. 
+**Weakly Supervised Segmentation** — Otsu-based pseudo-mask generation enables segmentation training without pixel-level annotations.
 
-### 🔧 Critical Fixes for Colab Sessions
-To resolve common path and permission errors:
+**Ablation Study** — Systematic comparison of 5 model variants (ResNet50, DenseNet121, +CBAM, +Aug, +SSL) via stratified k-fold cross-validation.
 
-1. **Kaggle Dataset Download:**
-   The dataset is owned by the project service account. Use this path:
-   ```bash
-   !kaggle datasets download -d supporoot/mycetoma-ai-pretraining-data --unzip -p data/
-   ```
+## Project Structure
 
-2. **PYTHONPATH Configuration:**
-   Before running any training scripts, tell Python where the `src` module is located:
-   ```bash
-   %env PYTHONPATH=.:$PYTHONPATH
-   ```
-
-3. **Working Directory:**
-   Ensure you are inside the repository root:
-   ```bash
-   %cd /content/MycetomaAi
-   ```
-
-## 🧠 System Architecture
-
-- **Attention-Enhanced Backbone (ResNet50CBAM):** Focuses on fungal/bacterial grain morphology.
-- **Hybrid Self-Supervised Encoder:** Fuses SimCLR and DINOv2 for robust feature extraction without labels.
-- **Multi-Task Diagnostic Head:** Jointly optimizes classification, detection, and subtype identification.
-
-## 🛠 Project Structure
-
-```bash
-MycetomaAi/
-├── README.md
-├── requirements.txt
-├── pyproject.toml
-├── Dockerfile
-├── configs/
-│   └── default.yaml
-├── notebooks/
-│   └── colab_training_setup.ipynb
+```
+├── configs/default.yaml            # All tunable parameters
 ├── scripts/
-│   ├── train.py            # Main entry point (Pretrain/Finetune)
-│   └── evaluate.py         # Model evaluation
+│   ├── train.py                    # SSL pretrain / multi-task finetune
+│   ├── evaluate.py                 # Metrics + confusion matrix
+│   ├── ablation.py                 # Ablation study (5 variants)
+│   ├── create_sample_data.py       # Synthetic test data
+│   └── validate_pipeline.py        # End-to-end validation
 ├── src/
-│   ├── data/               # DataLoaders & StainNormalization
-│   ├── models/             # Core AI Architectures
-│   └── training/           # Loss functions & Trainer loops
+│   ├── data/                       # Dataset, transforms, stain norm
+│   ├── models/                     # Backbone, SSL, heads, segmentation
+│   ├── training/                   # Losses, trainer, SSL pretrainer
+│   └── evaluation/                 # Metrics, Grad-CAM
+├── notebooks/
+│   └── mycetoma_training.ipynb     # Complete Colab notebook
+├── backend/                        # FastAPI inference server
+├── frontend/                       # Next.js diagnostic UI
 └── tests/
-    └── test_trainer_smoke.py
 ```
 
-## 📦 Installation (pip / editable)
+## Quick Start
 
 ```bash
-git clone https://github.com/yashnaiduu/MycetomaAi.git
-cd MycetomaAi
-
-# GPU (CUDA 12.4)
-pip install torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124 \
-    --extra-index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
 pip install -e .
+
+# Generate test data
+python scripts/create_sample_data.py --output_dir data/finetune --images_per_class 20
+
+# Train (all params from config)
+python scripts/train.py --config configs/default.yaml --stage finetune
+
+# Evaluate
+python scripts/evaluate.py --model_path checkpoints/multitask/best_multi_task_model.pth
+
+# Full validation
+python scripts/validate_pipeline.py
 ```
 
-Once installed in editable mode the console scripts are available:
+## Training with Real Data
 
-```bash
-# SSL pre-training
-mycetomai-train --stage pretrain --pretrain_data_dir data/pretrain --epochs 100
-
-# Supervised fine-tuning
-mycetomai-train --stage finetune --finetune_data_dir data/finetune \
-    --checkpoint checkpoints/ssl/ssl_encoder_ep100.pth
-
-# Evaluation
-mycetomai-eval --model_path checkpoints/multitask/best_multi_task_model.pth
+1. Organize images into class folders:
+```
+data/finetune/
+├── Eumycetoma/
+├── Actinomycetoma/
+└── Normal/
 ```
 
-You can also load the default config and override specific keys:
-
-```bash
-mycetomai-train --config configs/default.yaml --epochs 30 --batch_size 64
+2. Edit `configs/default.yaml` — all behavior is configurable:
+```yaml
+finetune_data_dir: data/finetune
+freeze_backbone: false
+loss_alpha: 1.0      # classification weight
+loss_delta: 0.5      # segmentation weight
+generate_masks: true  # Otsu pseudo-masks when annotations unavailable
 ```
 
-## 🐳 Docker (GPU)
+3. Run: `python scripts/train.py --config configs/default.yaml --stage finetune`
+
+## Docker
 
 ```bash
-# Build
 docker build -t mycetomai:latest .
-
-# Run training (mount data and checkpoints)
-docker run --gpus all \
-    -v $(pwd)/data:/workspace/data \
-    -v $(pwd)/checkpoints:/workspace/checkpoints \
-    mycetomai:latest \
+docker run --gpus all -v $(pwd)/data:/workspace/data mycetomai:latest \
     python scripts/train.py --config configs/default.yaml --stage finetune
 ```
-
-## ⚙️ Running CI Locally
-
-Install [act](https://github.com/nektos/act) and then run:
-
-```bash
-act push
-```
-
-Or run the individual steps manually:
-
-```bash
-# Install CPU PyTorch
-pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
-    --index-url https://download.pytorch.org/whl/cpu
-
-# Install remaining dependencies
-grep -vE '^(torch|torchvision|torchaudio|--extra-index-url)' requirements.txt \
-    | pip install -r /dev/stdin
-pip install -e . ruff pytest
-
-# Lint
-ruff check src/ scripts/ tests/
-
-# Tests
-pytest -v tests/
-```
-
-## 🛠 Usage
-
-### SSL Pretraining
-```bash
-python scripts/train.py --stage pretrain --epochs 100
-```
-
-### Supervised Finetuning
-```bash
-python scripts/train.py --stage finetune --checkpoint checkpoints/ssl/ssl_encoder_ep100.pth
-```
-
----
-*Optimized for high-performance training on NVIDIA T4/A100 GPUs via Google Colab.*
