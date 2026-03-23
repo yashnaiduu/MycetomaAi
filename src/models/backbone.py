@@ -71,22 +71,17 @@ class ResNet50CBAM(nn.Module):
         self.layer4 = resnet.layer4
         self.cbam4 = CBAMBlock(2048)
         
-    def forward(self, x):
+    def forward(self, x, return_features=False):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
 
-        x = self.layer1(x)
-        x = self.cbam1(x)
-        
-        x = self.layer2(x)
-        x = self.cbam2(x)
-        
-        x = self.layer3(x)
-        x = self.cbam3(x)
-        
-        x = self.layer4(x)
-        x = self.cbam4(x)
-        
-        return x
+        c1 = self.cbam1(self.layer1(x))
+        c2 = self.cbam2(self.layer2(c1))
+        c3 = self.cbam3(self.layer3(c2))
+        c4 = self.cbam4(self.layer4(c3))
+
+        if return_features:
+            return c4, [c1, c2, c3, c4]
+        return c4

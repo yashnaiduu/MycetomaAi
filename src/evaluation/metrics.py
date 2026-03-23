@@ -35,7 +35,8 @@ def compute_metrics(y_true, y_pred, y_prob=None):
         "F1_Score": f1,
         "ROC_AUC": auc,
         "Mean_Sensitivity": np.mean(sensitivities),
-        "Mean_Specificity": np.mean(specificities)
+        "Mean_Specificity": np.mean(specificities),
+        "Confusion_Matrix": cm.tolist(),
     }
 
 def bbox_iou(box1, box2):
