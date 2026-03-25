@@ -1,6 +1,12 @@
 # === Datasets & Large Files ===
 data/
 datasets/
+Datasets/
+
+# === Generated Outputs ===
+outputs/
+results/
+predictions/
 
 # === Python ===
 __pycache__/
@@ -52,3 +58,7 @@ kaggle.json
 tmp/
 temp/
 *.log
+
+# === Cache ===
+.cache/
+.pytest_cache/

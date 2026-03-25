@@ -74,8 +74,8 @@ class MultiTaskLoss(nn.Module):
     def __init__(self, alpha=1.0, beta=0.5, gamma=0.5, delta=0.5,
                  label_smoothing=0.1, class_weights=None):
         super().__init__()
-        weight_tensor = torch.tensor(class_weights).float() if class_weights else None
-        self.class_criterion = FocalLoss(gamma=2.0, weight=weight_tensor, label_smoothing=label_smoothing)
+        # Remove aggressive re-weighting, revert to standard CrossEntropy with soft targets
+        self.class_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
         self.detect_criterion = nn.SmoothL1Loss()
         self.subtype_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
         self.seg_criterion = DiceBCELoss()
@@ -104,8 +104,9 @@ class MultiTaskLoss(nn.Module):
         if "segmentation" in preds and "mask" in targets and targets["mask"] is not None:
             seg_loss = self.seg_criterion(preds["segmentation"], targets["mask"])
 
+        # Reduced entropy_loss weight to 0.005
         total = (self.alpha * class_loss + self.beta * detect_loss +
-                 self.gamma * subtype_loss + self.delta * seg_loss + 0.01 * entropy_loss)
+                 self.gamma * subtype_loss + self.delta * seg_loss + 0.005 * entropy_loss)
 
         return total, {
             "class_loss": class_loss.item(),

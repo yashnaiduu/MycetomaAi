@@ -141,15 +141,17 @@ def load_finetune_data(config, logger):
     if debug_overfit:
         indices = list(range(num_imgs))[:10]
         num_imgs = len(indices)
+        train_paths = [dataset.image_paths[i] for i in indices]
+        train_labels = [dataset.labels[i] for i in indices]
+        val_paths, val_labels = train_paths[:], train_labels[:]
     else:
-        indices = list(range(num_imgs))
-        random.shuffle(indices)
-    split = int(0.8 * num_imgs) or 1
-
-    train_paths = [dataset.image_paths[i] for i in indices[:split]]
-    train_labels = [dataset.labels[i] for i in indices[:split]]
-    val_paths = [dataset.image_paths[i] for i in indices[split:]]
-    val_labels = [dataset.labels[i] for i in indices[split:]]
+        from sklearn.model_selection import train_test_split
+        all_paths = dataset.image_paths
+        all_labels = dataset.labels
+        train_paths, val_paths, train_labels, val_labels = train_test_split(
+            all_paths, all_labels, test_size=0.2, stratify=all_labels, random_state=42
+        )
+        logger.info("Stratified split: train=%d, val=%d", len(train_paths), len(val_paths))
 
     train_ds = MycetomaDataset(
         train_paths, train_labels,
@@ -369,13 +371,7 @@ def main(args):
             "label_smoothing": float(config.get("label_smoothing", 0.0 if config.get("debug_overfit") else 0.1)),
         }
 
-        if train_ds.labels is not None and len(train_ds.labels) > 0:
-            counts = np.bincount(train_ds.labels)
-            if len(counts) > 1 and float(np.min(counts)) < 0.5 * float(np.max(counts)):
-                total = len(train_ds.labels)
-                weights = total / (len(counts) * np.maximum(counts, 1e-5))
-                loss_kwargs["class_weights"] = weights.tolist()
-                logger.info("Class imbalance detected. Applied weights: %s", weights.tolist())
+
 
         resume_path = resolve_resume_path(config.get("resume_from"), config["checkpoint_dir"])
 
