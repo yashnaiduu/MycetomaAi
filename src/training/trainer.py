@@ -2,10 +2,13 @@ import logging
 import os
 import math
 from typing import Optional
+from collections import Counter
 
+import numpy as np
 import torch
 from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from sklearn.metrics import f1_score
 from tqdm import tqdm
 
 from .losses import MultiTaskLoss
@@ -40,7 +43,9 @@ class MultiTaskTrainer:
 
         os.makedirs(self.save_dir, exist_ok=True)
         self.best_val_loss = float("inf")
+        self.best_val_f1 = 0.0
         self.no_improve_epochs = 0
+        self.hard_sample_indices = []
 
         if resume_from:
             self._load_checkpoint(resume_from)
@@ -89,6 +94,9 @@ class MultiTaskTrainer:
         self.model.train()
         total_loss = 0.0
 
+        if not hasattr(self, "epoch_preds"):
+            self.epoch_preds = []
+
         pbar = tqdm(self.train_loader, desc=f"Train Epoch {epoch + 1}/{self.epochs}")
         self.optimizer.zero_grad(set_to_none=True)
 
@@ -112,9 +120,11 @@ class MultiTaskTrainer:
                 logger.warning("Empty segmentation output at epoch %d step %d", epoch + 1, batch_idx)
 
             if "classification" in preds:
-                conf = torch.softmax(preds["classification"].detach(), dim=1).max(dim=1).values.mean()
+                cls_detach = preds["classification"].detach()
+                conf = torch.softmax(cls_detach, dim=1).max(dim=1).values.mean()
                 if conf < 0.1:
                     logger.warning("Low confidence %.4f at epoch %d step %d", conf.item(), epoch + 1, batch_idx)
+                self.epoch_preds.extend(cls_detach.argmax(dim=1).cpu().tolist())
 
             self.scaler.scale(loss).backward()
 
@@ -142,6 +152,14 @@ class MultiTaskTrainer:
                     "lr": self.scheduler.get_last_lr()[0],
                 }, step=self.global_step)
 
+        if epoch < 5 and self.epoch_preds:
+            counts = [self.epoch_preds.count(i) for i in range(3)]
+            logger.info("Epoch %d prediction counts (0, 1, 2): %s", epoch + 1, counts)
+            if max(counts) >= 0.9 * len(self.epoch_preds):
+                dom = counts.index(max(counts))
+                logger.warning("COLLAPSE DETECTED: Model predicted class %d for %d/%d samples in Epoch %d!", dom, max(counts), len(self.epoch_preds), epoch + 1)
+        self.epoch_preds = []
+
         return total_loss / len(self.train_loader)
 
     @torch.no_grad()
@@ -149,10 +167,12 @@ class MultiTaskTrainer:
         self.model.eval()
 
         if self.val_loader is None or len(self.val_loader) == 0:
-            return float("inf")
+            return float("inf"), 0.0
 
         amp_device = "cuda" if self.device.type == "cuda" else "cpu"
         total_loss = 0.0
+        val_preds, val_labels = [], []
+
         for batch in self.val_loader:
             images = batch["image"].to(self.device, non_blocking=True)
             targets = {k: v.to(self.device, non_blocking=True) for k, v in batch.items() if k != "image"}
@@ -163,38 +183,50 @@ class MultiTaskTrainer:
 
             total_loss += loss.item()
 
-            if "segmentation" in preds:
-                seg = preds["segmentation"]
-                if seg.sum() == 0:
-                    logger.warning("Empty segmentation mask in validation")
-                cls_conf = torch.softmax(preds["classification"], dim=1).max(dim=1).values
-                if cls_conf.mean() < 0.1:
-                    logger.warning("Low classification confidence: %.4f", cls_conf.mean().item())
+            if "classification" in preds and "label" in targets:
+                val_preds.extend(preds["classification"].argmax(dim=1).cpu().tolist())
+                val_labels.extend(targets["label"].cpu().tolist())
 
-        return total_loss / len(self.val_loader)
+        avg_loss = total_loss / len(self.val_loader)
+        val_f1 = f1_score(val_labels, val_preds, average='macro', zero_division=0) if val_labels else 0.0
+
+        pred_dist = Counter(val_preds)
+        logger.info("Val prediction distribution: %s | F1: %.4f", dict(pred_dist), val_f1)
+
+        return avg_loss, val_f1
 
     def train(self):
         logger.info("Starting Multi-Task Fine-Tuning (AMP=%s)...", self.use_amp)
         for epoch in range(self.start_epoch, self.epochs):
             train_loss = self.train_epoch(epoch)
-            val_loss = self.validate()
+            val_loss, val_f1 = self.validate()
             self.scheduler.step()
 
-            logger.info("Epoch %s/%s - Train: %.4f | Val: %.4f", epoch + 1, self.epochs, train_loss, val_loss)
+            logger.info("Epoch %s/%s - Train: %.4f | Val: %.4f | F1: %.4f", epoch + 1, self.epochs, train_loss, val_loss, val_f1)
 
             if self.wandb_run is not None:
                 self.wandb_run.log({
                     "val/loss": val_loss,
+                    "val/f1": val_f1,
                     "epoch": epoch + 1,
                 }, step=self.global_step)
 
-            improved = val_loss < self.best_val_loss
-            if improved:
-                self.best_val_loss = val_loss
+            # Save best by F1 (primary) and val_loss (secondary)
+            f1_improved = val_f1 > self.best_val_f1
+            loss_improved = val_loss < self.best_val_loss
+
+            if f1_improved:
+                self.best_val_f1 = val_f1
                 self.no_improve_epochs = 0
                 self._save_checkpoint(epoch + 1, val_loss, "best_multi_task_model.pth")
+                logger.info("New best F1: %.4f", val_f1)
+            elif loss_improved:
+                self.no_improve_epochs = 0
             else:
                 self.no_improve_epochs += 1
+
+            if loss_improved:
+                self.best_val_loss = val_loss
 
             self._save_checkpoint(epoch + 1, val_loss, "last.pth")
 

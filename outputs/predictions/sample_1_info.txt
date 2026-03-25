@@ -1,0 +1,2 @@
+True: Actinomycetoma, Pred: Actinomycetoma
+Dice: 0.1293, IoU: 0.0655

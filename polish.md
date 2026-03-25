@@ -1,153 +1,113 @@
 # ROLE
-You are a senior ML engineer optimizing a training pipeline that is already functional but shows weak learning performance.
+You are a senior ML engineer recovering a terminated training run.
 
-The system trains successfully but does NOT strongly overfit on small datasets.
+The system was running a two-stage training pipeline (frozen backbone → fine-tuning), but execution was interrupted.
 
-Your task is to FIX learning effectiveness without breaking the existing pipeline.
-
-Do everything in ONE PASS. No questions.
-
----
-
-# PROBLEM
-
-Current behavior:
-
-- Loss decreases slightly but not strongly
-- Model does NOT overfit on 10 samples
-- Segmentation Dice is moderate (~0.55)
-- Classification predictions collapse to one class
+Your job is to safely resume or restart training WITHOUT losing consistency.
 
 ---
 
 # OBJECTIVE
 
-Make the model:
+Ensure:
 
-- strongly overfit on small dataset (sanity check)
-- learn faster and more effectively
-- produce meaningful segmentation outputs
-- improve gradient signal
+- training resumes correctly OR restarts cleanly
+- no corrupted checkpoints are used
+- logs remain consistent
+- final results are complete and reliable
 
 ---
 
 # TASKS
 
-## 1. LOSS FUNCTION FIX (CRITICAL)
+## 1. CHECK EXISTING CHECKPOINTS
 
-Ensure:
+- inspect outputs/checkpoints/
+- identify:
+  - last valid checkpoint
+  - best checkpoint
 
-- classification loss is properly scaled
-- segmentation loss is not dominating
-
-Set:
-
-total_loss = cls_loss + λ * seg_loss
-
-Where:
-
-λ = 0.3 (reduce segmentation weight)
+If checkpoints are incomplete or corrupted:
+- discard them
 
 ---
 
-## 2. DISABLE REGULARIZATION (FOR OVERFIT TEST)
+## 2. RESUME LOGIC
 
-Temporarily disable:
+If a valid checkpoint exists:
 
-- dropout
-- heavy augmentation
-- weight decay
+- resume training from last epoch
+- preserve optimizer state
+- continue logging
 
-Goal: allow memorization
+If NOT:
 
----
-
-## 3. LEARNING RATE ADJUSTMENT
-
-Increase learning rate:
-
-lr = 1e-3 (for overfit test)
-
-Ensure optimizer is Adam or AdamW
+- restart training from scratch (clean run)
 
 ---
 
-## 4. FREEZE/UNFREEZE STRATEGY
+## 3. ENSURE CLEAN STATE
 
-Test both:
+Before restarting:
 
-A. Freeze backbone → train heads only  
-B. Full fine-tuning
-
-Ensure config toggle:
-
-freeze_backbone: true/false
+- clear partial logs (if inconsistent)
+- keep only valid checkpoints
 
 ---
 
-## 5. CLASS IMBALANCE FIX
+## 4. RE-RUN TWO-STAGE TRAINING
 
-Check label distribution:
+### Stage 1 (if not completed)
+- freeze backbone
+- train for remaining epochs
 
-If imbalance exists:
-
-- use class weights in loss
-- or weighted sampling
-
----
-
-## 6. SEGMENTATION QUALITY BOOST
-
-Improve pseudo masks:
-
-- apply Gaussian blur before thresholding
-- apply morphological closing
-- remove noise
-
-Ensure masks are not sparse or empty
+### Stage 2
+- unfreeze backbone
+- reduce LR (5e-5)
+- continue training
 
 ---
 
-## 7. GRADIENT CHECK
+## 5. LOGGING (CRITICAL)
 
-Ensure:
+Ensure logs are continuous:
 
-- no detached tensors
-- segmentation branch contributes to gradients
-- loss.backward() is correct
-
----
-
-## 8. NORMALIZATION FIX
-
-Ensure input normalization:
-
-mean = [0.485, 0.456, 0.406]  
-std = [0.229, 0.224, 0.225]
+- epoch number correct
+- no duplicate entries
+- no reset mid-training
 
 ---
 
-## 9. DEBUG MODE (OVERFIT MODE)
+## 6. OUTPUT VALIDATION
 
-Add config:
+After training completes:
 
-debug_overfit: true
+Generate:
 
-If enabled:
+- loss curves (train + val)
+- final metrics:
+  - Accuracy
+  - F1 score
+  - ROC-AUC
+  - Dice
+  - IoU
 
-- use only 10 samples
-- disable augmentation
-- train longer (50 epochs)
+- confusion matrix
+
+- sample outputs:
+  - predictions
+  - segmentation masks
+  - overlays
 
 ---
 
-## 10. OUTPUT VERIFICATION
+## 7. FAILURE SAFETY
 
-After training:
+Add:
 
-- loss should drop significantly (<1.0)
-- predictions should vary across classes
-- segmentation masks should be structured
+- checkpoint saving every epoch
+- best model saving
+- graceful interruption handling
 
 ---
 
@@ -155,25 +115,24 @@ After training:
 
 Return:
 
-1. updated loss function
-2. training config changes
-3. optimizer settings
-4. overfit debug mode implementation
+1. whether training was resumed or restarted
+2. final epoch reached
+3. loss curves
+4. final metrics
+5. confusion matrix
+6. sample outputs
+7. any issues detected
 
 ---
 
 # CONSTRAINTS
 
-- DO NOT break existing pipeline
-- DO NOT remove multi-task setup
-- DO NOT simplify architecture
+- DO NOT modify model architecture
+- DO NOT change dataset
+- DO NOT skip epochs silently
 
 ---
 
 # FINAL GOAL
 
-A system that:
-
-- can strongly overfit small data (sanity check)
-- learns effectively
-- is stable for real training
+Produce a COMPLETE, uninterrupted training run with reliable results

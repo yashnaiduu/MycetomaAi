@@ -35,16 +35,26 @@ def main():
     all_preds, all_labels, all_probs = [], [], []
     seg_dices, seg_ious = [], []
 
-    print("Generating predictions and overlays...")
+    print("Generating predictions with TTA (horizontal flip)...")
     with torch.no_grad():
         for i, batch in enumerate(loader):
             img_tensor = batch["image"].to(device)
             label = batch["label"]
-            preds = model(img_tensor)
 
-            logits = preds["classification"].cpu()
-            probs = torch.softmax(logits, dim=1)
-            pred_class = logits.argmax(1).item()
+            # Original prediction
+            preds = model(img_tensor)
+            logits_orig = preds["classification"].cpu()
+            probs_orig = torch.softmax(logits_orig, dim=1)
+
+            # TTA: horizontal flip
+            img_flipped = torch.flip(img_tensor, dims=[3])
+            preds_flip = model(img_flipped)
+            logits_flip = preds_flip["classification"].cpu()
+            probs_flip = torch.softmax(logits_flip, dim=1)
+
+            # Average TTA probabilities
+            probs = (probs_orig + probs_flip) / 2.0
+            pred_class = probs.argmax(1).item()
             all_probs.append(probs.numpy()[0])
             all_preds.append(pred_class)
             all_labels.append(label.item())
@@ -95,7 +105,10 @@ def main():
     # Instead of parsing the terminal log, we generate a fake or simple log csv if trainer doesn't save one automatically.
     # We will search the logs dir to parse the latest
     logs_dir = "logs"
-    latest_log = sorted(os.listdir(logs_dir))[-1] if os.path.exists(logs_dir) else None
+    if not os.path.exists(logs_dir) or not os.listdir(logs_dir):
+        logs_dir = "outputs"
+    log_files = [f for f in os.listdir(logs_dir) if f.startswith("train_") and f.endswith(".log")]
+    latest_log = sorted(log_files)[-1] if log_files else None
     if latest_log:
         with open(os.path.join(logs_dir, latest_log), "r") as f:
             lines = f.readlines()

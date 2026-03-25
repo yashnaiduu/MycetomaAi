@@ -53,13 +53,29 @@ class DiceBCELoss(nn.Module):
         bce = F.binary_cross_entropy(pred, target, reduction='mean')
         return bce + self.dice(pred, target)
 
+class FocalLoss(nn.Module):
+    """Focal loss for hard example emphasis. gamma=2 down-weights easy samples."""
+    def __init__(self, gamma=2.0, weight=None, label_smoothing=0.1):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+        self.label_smoothing = label_smoothing
+
+    def forward(self, logits, targets):
+        ce = F.cross_entropy(logits, targets, weight=self.weight,
+                             label_smoothing=self.label_smoothing, reduction='none')
+        pt = torch.exp(-ce)
+        focal = ((1 - pt) ** self.gamma) * ce
+        return focal.mean()
+
+
 class MultiTaskLoss(nn.Module):
     """Joint classification + segmentation loss."""
     def __init__(self, alpha=1.0, beta=0.5, gamma=0.5, delta=0.5,
                  label_smoothing=0.1, class_weights=None):
         super().__init__()
         weight_tensor = torch.tensor(class_weights).float() if class_weights else None
-        self.class_criterion = nn.CrossEntropyLoss(weight=weight_tensor, label_smoothing=label_smoothing)
+        self.class_criterion = FocalLoss(gamma=2.0, weight=weight_tensor, label_smoothing=label_smoothing)
         self.detect_criterion = nn.SmoothL1Loss()
         self.subtype_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
         self.seg_criterion = DiceBCELoss()
@@ -70,7 +86,11 @@ class MultiTaskLoss(nn.Module):
         self.delta = delta
 
     def forward(self, preds, targets):
-        class_loss = self.class_criterion(preds["classification"], targets["label"])
+        logits = preds["classification"] / 2.0
+        class_loss = self.class_criterion(logits, targets["label"])
+
+        probs = F.softmax(logits, dim=1)
+        entropy_loss = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).mean()
 
         detect_loss = torch.tensor(0.0, device=class_loss.device)
         if "bbox" in targets and targets["bbox"] is not None:
@@ -85,11 +105,12 @@ class MultiTaskLoss(nn.Module):
             seg_loss = self.seg_criterion(preds["segmentation"], targets["mask"])
 
         total = (self.alpha * class_loss + self.beta * detect_loss +
-                 self.gamma * subtype_loss + self.delta * seg_loss)
+                 self.gamma * subtype_loss + self.delta * seg_loss + 0.01 * entropy_loss)
 
         return total, {
             "class_loss": class_loss.item(),
             "detect_loss": detect_loss.item(),
             "subtype_loss": subtype_loss.item(),
             "seg_loss": seg_loss.item(),
+            "entropy_loss": entropy_loss.item(),
         }

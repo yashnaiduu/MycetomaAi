@@ -300,10 +300,26 @@ def main(args):
         if train_ds is None or num_imgs == 0:
             return
 
+        train_sampler = None
+        train_shuffle = True
+
+        if train_ds.labels is not None and len(train_ds.labels) > 0:
+            counts = np.bincount(train_ds.labels)
+            class_weights = 1.0 / np.maximum(counts, 1)
+            sample_weights = [class_weights[lbl] for lbl in train_ds.labels]
+            train_sampler = torch.utils.data.WeightedRandomSampler(
+                weights=sample_weights,
+                num_samples=len(sample_weights),
+                replacement=True
+            )
+            train_shuffle = False
+            logger.info("Enabled WeightedRandomSampler for completely balanced training batches.")
+
         train_loader = DataLoader(
             train_ds,
             batch_size=int(config.get("batch_size", 16)),
-            shuffle=True,
+            shuffle=train_shuffle,
+            sampler=train_sampler,
             num_workers=int(config.get("num_workers", 4)),
         )
         val_loader = DataLoader(
@@ -329,11 +345,19 @@ def main(args):
         if config.get("freeze_backbone", False):
             for param in model.backbone.parameters():
                 param.requires_grad = False
-            logger.info("Backbone frozen")
+            model.backbone_frozen = True
+            logger.info("Backbone completely frozen (Stage 1)")
+        else:
+            for param in model.backbone.parameters():
+                param.requires_grad = True
+            model.backbone_frozen = False
+            logger.info("Entire backbone unfrozen (Stage 2)")
+
+        assert any(p.requires_grad for p in model.parameters()), "No parameters require gradients. Cannot train."
 
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
-            lr=float(config.get("lr", 1e-3)) if config.get("debug_overfit") else float(config.get("lr", 1e-4)) * 0.1,
+            lr=float(config.get("lr", 1e-3)) if config.get("debug_overfit") else float(config.get("lr", 3e-5)),
             weight_decay=0.0 if config.get("debug_overfit") else float(config.get("weight_decay", 1e-2)),
         )
 

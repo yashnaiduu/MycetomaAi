@@ -75,19 +75,33 @@ def infer_labels_from_folders(data_dir: str) -> Tuple[List[str], List[int], Dict
 
 
 def generate_pseudo_mask(image: np.ndarray) -> np.ndarray:
-    """Generate weak supervision mask via Otsu thresholding on stain channel."""
+    """Generate weak supervision mask via Otsu + Canny edge fusion."""
     gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # Otsu branch
+    thresh, _ = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, otsu_mask = cv2.threshold(blurred, max(0, thresh - 15), 255, cv2.THRESH_BINARY_INV)
+
+    # Canny edge branch for boundary sharpness
+    edges = cv2.Canny(blurred, threshold1=30, threshold2=100)
+    edge_dilated = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=2)
+
+    # Fuse: union of Otsu region and edge-detected boundaries
+    mask = cv2.bitwise_or(otsu_mask, edge_dilated)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.dilate(mask, kernel, iterations=1)
 
-    # Ensure mask is not too sparse
-    if np.sum(mask) < 0.01 * mask.shape[0] * mask.shape[1] * 255:
+    # Smooth to reduce jagged edges
+    mask = cv2.GaussianBlur(mask, (3, 3), 0)
+    _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+    if np.sum(mask) < 0.05 * mask.shape[0] * mask.shape[1] * 255:
         h, w = mask.shape
-        cv2.circle(mask, (w//2, h//2), min(h, w)//4, 255, -1)
+        cv2.circle(mask, (w//2, h//2), int(min(h, w)*0.35), 255, -1)
 
     return (mask / 255.0).astype(np.float32)
 
