@@ -1,5 +1,6 @@
 # === Datasets & Large Files ===
 data/
+datasets/
 
 # === Python ===
 __pycache__/

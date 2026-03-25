@@ -3,10 +3,16 @@ from albumentations.pytorch import ToTensorV2
 from torchvision import transforms
 from typing import Dict
 
-def get_supervised_transforms(size: int = 224) -> Dict[str, A.Compose]:
+def get_supervised_transforms(size: int = 224, debug: bool = False) -> Dict[str, A.Compose]:
     """Train/val/test augmentation transforms."""
-    return {
-        'train': A.Compose([
+    if debug:
+        train_transforms = A.Compose([
+            A.Resize(size, size),
+            A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+            ToTensorV2()
+        ])
+    else:
+        train_transforms = A.Compose([
             A.Resize(size, size),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.5),
@@ -18,7 +24,10 @@ def get_supervised_transforms(size: int = 224) -> Dict[str, A.Compose]:
             A.GaussNoise(p=0.2),
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
             ToTensorV2()
-        ]),
+        ])
+
+    return {
+        'train': train_transforms,
         'val': A.Compose([
             A.Resize(size, size),
             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),

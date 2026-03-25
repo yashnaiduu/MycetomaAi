@@ -7,7 +7,7 @@ from src.training.losses import MultiTaskLoss
 
 
 class _TinySegDataset(Dataset):
-    def __init__(self, n=8):
+    def __init__(self, n=10):
         self.n = n
         self.fixed_label = [i % 3 for i in range(n)]
 
@@ -30,8 +30,8 @@ def test_overfit():
     criterion = MultiTaskLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-    ds = _TinySegDataset(n=8)
-    loader = DataLoader(ds, batch_size=4, shuffle=False)
+    ds = _TinySegDataset(n=10)
+    loader = DataLoader(ds, batch_size=5, shuffle=False)
 
     # Verify shapes before training
     model.eval()
@@ -48,7 +48,7 @@ def test_overfit():
     # Train and verify loss decreases
     model.train()
     losses = []
-    for epoch in range(10):
+    for epoch in range(20):
         epoch_loss = 0.0
         for batch in loader:
             images = batch["image"].to(device)

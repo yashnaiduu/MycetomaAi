@@ -97,7 +97,8 @@ def load_finetune_data(config, logger):
     csv_path = config.get("annotations_csv")
     gen_masks = bool(config.get("generate_masks", True))
     use_macenko = bool(config.get("use_macenko", True))
-    transforms = get_supervised_transforms(int(config.get("image_size", 224)))
+    debug_overfit = bool(config.get("debug_overfit", False))
+    transforms = get_supervised_transforms(int(config.get("image_size", 224)), debug=debug_overfit)
 
     if csv_path and os.path.exists(csv_path):
         logger.info("Loading from CSV: %s", csv_path)
@@ -108,10 +109,12 @@ def load_finetune_data(config, logger):
             use_macenko=use_macenko,
         )
         num_imgs = len(dataset)
-        if num_imgs == 0:
-            return None, None, 0
-        indices = list(range(num_imgs))
-        random.shuffle(indices)
+        if debug_overfit:
+            indices = list(range(num_imgs))[:10]
+            num_imgs = len(indices)
+        else:
+            indices = list(range(num_imgs))
+            random.shuffle(indices)
         split = int(0.8 * num_imgs) or 1
         train_ds = torch.utils.data.Subset(dataset, indices[:split])
         val_ds = torch.utils.data.Subset(dataset, indices[split:])
@@ -135,8 +138,12 @@ def load_finetune_data(config, logger):
 
     logger.info("Loaded %d images, classes: %s", num_imgs, class_map)
 
-    indices = list(range(num_imgs))
-    random.shuffle(indices)
+    if debug_overfit:
+        indices = list(range(num_imgs))[:10]
+        num_imgs = len(indices)
+    else:
+        indices = list(range(num_imgs))
+        random.shuffle(indices)
     split = int(0.8 * num_imgs) or 1
 
     train_paths = [dataset.image_paths[i] for i in indices[:split]]
@@ -192,9 +199,15 @@ def main(args):
         "log_dir": args.log_dir,
         "early_stop_patience": args.early_stop_patience,
         "freeze_backbone": args.freeze_backbone,
+        "debug_overfit": args.debug_overfit,
     }
 
     config = merge_config(config, cli_override)
+
+    if config.get("debug_overfit"):
+        config["epochs"] = config.get("epochs") or 50
+        config["lr"] = config.get("lr") or 1e-3
+        config["batch_size"] = config.get("batch_size") or 10
 
     if "run_id" not in config or not config["run_id"]:
         config["run_id"] = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -320,17 +333,25 @@ def main(args):
 
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
-            lr=float(config.get("lr", 1e-4)) * 0.1,
-            weight_decay=float(config.get("weight_decay", 1e-2)),
+            lr=float(config.get("lr", 1e-3)) if config.get("debug_overfit") else float(config.get("lr", 1e-4)) * 0.1,
+            weight_decay=0.0 if config.get("debug_overfit") else float(config.get("weight_decay", 1e-2)),
         )
 
         loss_kwargs = {
             "alpha": float(config.get("loss_alpha", 1.0)),
             "beta": float(config.get("loss_beta", 0.5)),
             "gamma": float(config.get("loss_gamma", 0.5)),
-            "delta": float(config.get("loss_delta", 0.5)),
-            "label_smoothing": float(config.get("label_smoothing", 0.1)),
+            "delta": float(config.get("loss_delta", 0.3)),
+            "label_smoothing": float(config.get("label_smoothing", 0.0 if config.get("debug_overfit") else 0.1)),
         }
+
+        if train_ds.labels is not None and len(train_ds.labels) > 0:
+            counts = np.bincount(train_ds.labels)
+            if len(counts) > 1 and float(np.min(counts)) < 0.5 * float(np.max(counts)):
+                total = len(train_ds.labels)
+                weights = total / (len(counts) * np.maximum(counts, 1e-5))
+                loss_kwargs["class_weights"] = weights.tolist()
+                logger.info("Class imbalance detected. Applied weights: %s", weights.tolist())
 
         resume_path = resolve_resume_path(config.get("resume_from"), config["checkpoint_dir"])
 
@@ -397,6 +418,7 @@ def cli():
     parser.add_argument("--log_dir", type=str, default=None)
     parser.add_argument("--early_stop_patience", type=int, default=None)
     parser.add_argument("--freeze_backbone", action="store_true")
+    parser.add_argument("--debug_overfit", action="store_true")
     args = parser.parse_args()
     main(args)
 

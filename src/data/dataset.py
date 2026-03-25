@@ -84,6 +84,11 @@ def generate_pseudo_mask(image: np.ndarray) -> np.ndarray:
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
+    # Ensure mask is not too sparse
+    if np.sum(mask) < 0.01 * mask.shape[0] * mask.shape[1] * 255:
+        h, w = mask.shape
+        cv2.circle(mask, (w//2, h//2), min(h, w)//4, 255, -1)
+
     return (mask / 255.0).astype(np.float32)
 
 

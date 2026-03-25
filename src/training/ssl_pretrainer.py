@@ -7,7 +7,7 @@ from torch.amp import autocast, GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 
-from .losses import InfoNCE
+from .losses import NTXentLoss
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class SSLPreTrainer:
         self.use_amp = use_amp and device.type == "cuda"
         self.wandb_run = wandb_run
 
-        self.criterion = InfoNCE(temperature=0.1).to(device)
+        self.criterion = NTXentLoss(temperature=0.1).to(device)
         self.scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
         scaler_device = "cuda" if device.type == "cuda" else "cpu"
         self.scaler = GradScaler(scaler_device, enabled=self.use_amp)

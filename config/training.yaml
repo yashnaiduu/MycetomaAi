@@ -1,0 +1,11 @@
+debug_overfit: false
+batch_size: 16
+epochs: 30
+lr: 0.0001
+freeze_backbone: true
+use_ssl_pretrained: true
+loss_alpha: 1.0
+loss_delta: 0.3
+stage: finetune
+checkpoint_dir: checkpoints/multitask
+log_dir: outputs

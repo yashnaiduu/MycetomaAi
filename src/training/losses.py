@@ -2,28 +2,32 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-class InfoNCE(nn.Module):
-    """Contrastive loss for SimCLR."""
-    def __init__(self, temperature=0.1):
+class NTXentLoss(nn.Module):
+    def __init__(self, temperature=0.5):
         super().__init__()
         self.temperature = temperature
+        self.criterion = nn.CrossEntropyLoss(reduction="sum")
 
     def forward(self, z1, z2):
+        batch_size = z1.size(0)
+        
         z1 = F.normalize(z1, dim=1)
         z2 = F.normalize(z2, dim=1)
+        
+        z = torch.cat([z1, z2], dim=0)
 
-        z = torch.cat((z1, z2), dim=0)
-        sim = torch.exp(torch.mm(z, z.t().contiguous()) / self.temperature)
+        sim_matrix = torch.matmul(z, z.T) / self.temperature
 
-        mask = (~torch.eye(z.size(0), dtype=bool, device=z.device)).float()
-        sim = sim * mask
+        labels = torch.cat([
+            torch.arange(batch_size, 2 * batch_size),
+            torch.arange(batch_size)
+        ]).to(z.device)
 
-        B = z1.size(0)
-        pos = torch.cat((torch.diag(sim, B), torch.diag(sim, -B)), dim=0)
-        neg_sum = sim.sum(dim=1)
-        return -torch.log(pos / neg_sum).mean()
+        mask = torch.eye(2 * batch_size, dtype=torch.bool).to(z.device)
+        sim_matrix.masked_fill_(mask, -9e15)
 
+        loss = self.criterion(sim_matrix, labels)
+        return loss / (2 * batch_size)
 
 class DiceLoss(nn.Module):
     """Soft Dice loss."""
@@ -39,7 +43,6 @@ class DiceLoss(nn.Module):
             pred_flat.sum() + target_flat.sum() + self.smooth
         )
 
-
 class DiceBCELoss(nn.Module):
     """Combined Dice + BCE."""
     def __init__(self, smooth=1.0):
@@ -50,13 +53,13 @@ class DiceBCELoss(nn.Module):
         bce = F.binary_cross_entropy(pred, target, reduction='mean')
         return bce + self.dice(pred, target)
 
-
 class MultiTaskLoss(nn.Module):
     """Joint classification + segmentation loss."""
     def __init__(self, alpha=1.0, beta=0.5, gamma=0.5, delta=0.5,
-                 label_smoothing=0.1):
+                 label_smoothing=0.1, class_weights=None):
         super().__init__()
-        self.class_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+        weight_tensor = torch.tensor(class_weights).float() if class_weights else None
+        self.class_criterion = nn.CrossEntropyLoss(weight=weight_tensor, label_smoothing=label_smoothing)
         self.detect_criterion = nn.SmoothL1Loss()
         self.subtype_criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
         self.seg_criterion = DiceBCELoss()
